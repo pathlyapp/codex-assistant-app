@@ -24,8 +24,8 @@ jobs:
       run:
         working-directory: tauri-gui
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -49,7 +49,7 @@ jobs:
           if (-not $installer) { throw "NSIS installer was not produced" }
           New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item $installer.FullName "artifact/CodexAssistant-$version-windows-$env:RELEASE_ARCH-setup.exe"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: codex-assistant-windows-${{ matrix.arch }}
           path: tauri-gui/artifact/*
@@ -63,8 +63,8 @@ jobs:
       run:
         working-directory: tauri-gui
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -83,7 +83,7 @@ jobs:
           test -n "$app"
           mkdir -p artifact
           ditto -c -k --sequesterRsrc --keepParent "$app" "artifact/CodexAssistant-${version}-macos-arm64.app.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: codex-assistant-macos-arm64
           path: tauri-gui/artifact/*
@@ -96,11 +96,11 @@ jobs:
       - macos
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: codex-assistant-*
           path: release-assets
@@ -109,7 +109,7 @@ jobs:
         run: |
           version=$(node -p "require('./tauri-gui/package.json').version")
           node tauri-gui/tools/generate-release-manifest.mjs --version "$version" --input release-assets
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: codex-assistant-release-bundle
           path: release-assets/*

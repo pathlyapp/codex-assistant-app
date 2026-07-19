@@ -17,13 +17,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - name: Verify tag version
         run: node tauri-gui/tools/check-version.mjs "${GITHUB_REF_NAME}"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: codex-assistant-release-bundle
           path: release-assets

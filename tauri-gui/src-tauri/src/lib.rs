@@ -706,7 +706,7 @@ fn wait_for_chatgpt(timeout: Duration) -> bool {
 fn detect_chatgpt_app() -> Result<DesktopAppInfo, String> {
     #[cfg(target_os = "windows")]
     {
-        return detect_chatgpt_windows();
+        detect_chatgpt_windows()
     }
     #[cfg(target_os = "macos")]
     {
