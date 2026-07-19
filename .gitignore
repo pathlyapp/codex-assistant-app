@@ -1,0 +1,68 @@
+# Operating system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Node.js
+**/node_modules/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Rust and Tauri generated files
+**/target/
+**/src-tauri/gen/
+
+# Build and release outputs
+/dist/
+/build/
+/out/
+*.exe
+*.msi
+*.msix
+*.msixbundle
+*.app
+*.app.zip
+*.dmg
+*.pkg
+*.zip
+/package-manifest.json
+SHA256SUMS.txt
+
+# Test outputs
+/coverage/
+**/playwright-report/
+**/test-results/
+
+# Logs and caches
+*.log
+.cache/
+.tmp/
+tmp/
+temp/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.secret
+*.dpapi
+**/runtime/
+**/config.local.*

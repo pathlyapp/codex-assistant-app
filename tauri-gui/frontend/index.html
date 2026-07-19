@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex 助手</title>
+    <link rel="icon" href="./assets/codex-assistant-icon-32.png" />
+    <link rel="stylesheet" href="./styles.css?v=0.8.4" />
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="./assets/codex-assistant-icon-128.png" alt="" />
+          <div>
+            <strong>Codex 助手</strong>
+            <span>Windows 配置中心</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="主导航">
+          <button class="nav-item active" type="button" data-view="overview">
+            <span class="icon" data-icon="home"></span><span>首页</span>
+          </button>
+          <button class="nav-item" type="button" data-view="setup">
+            <span class="icon" data-icon="route"></span><span>服务配置</span>
+          </button>
+          <button class="nav-item" type="button" data-view="appearance">
+            <span class="icon" data-icon="palette"></span><span>主题换肤</span>
+          </button>
+          <button class="nav-item" type="button" data-view="diagnostics">
+            <span class="icon" data-icon="activity"></span><span>帮助与诊断</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="trust-mark"><span class="icon" data-icon="shieldCheck"></span>本地配置 · 凭证加密</div>
+          <span id="versionLabel">Codex 助手 0.8.4</span>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h1 id="pageTitle">首页</h1>
+            <p id="pageSubtitle">确认 ChatGPT 与 Codex 服务状态</p>
+          </div>
+          <button id="refreshButton" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
+            <span class="icon" data-icon="refresh"></span>
+          </button>
+        </header>
+
+        <div id="offlineBanner" class="banner warning hidden">
+          <span class="icon" data-icon="alert"></span>
+          <span>当前是界面预览。请从 Codex 助手桌面程序打开以读取系统状态。</span>
+        </div>
+
+        <section id="overviewView" class="view active" data-view-panel="overview">
+          <div id="readinessPanel" class="readiness-panel loading">
+            <div class="readiness-icon"><span class="icon" data-icon="loader"></span></div>
+            <div class="readiness-copy">
+              <h2 id="readinessTitle">正在检查本机状态</h2>
+              <p id="readinessText">正在确认 ChatGPT、Router 和 Codex 配置</p>
+            </div>
+            <button id="overviewAction" class="primary-button" type="button" disabled>请稍候</button>
+          </div>
+
+          <section class="system-overview" aria-labelledby="environmentTitle">
+            <div class="section-title-row">
+              <div>
+                <h2 id="environmentTitle">环境检查</h2>
+                <p>结果来自当前 Windows 用户环境。</p>
+              </div>
+              <span id="overallStatusBadge" class="status-badge pending">检查中</span>
+            </div>
+            <div class="check-list">
+              <article class="check-row" id="appStatusCard">
+                <div class="check-row-icon"><span class="icon" data-icon="appWindow"></span></div>
+                <div class="check-row-copy">
+                  <strong id="appStatusTitle">正在检测 ChatGPT</strong>
+                  <small id="appStatusDetail">请稍候</small>
+                </div>
+                <span id="appStatusBadge" class="status-badge pending">检查中</span>
+              </article>
+              <article class="check-row" id="routerStatusCard">
+                <div class="check-row-icon"><span class="icon" data-icon="route"></span></div>
+                <div class="check-row-copy">
+                  <strong id="routerStatusTitle">正在检测 Router</strong>
+                  <small id="routerStatusDetail">请稍候</small>
+                </div>
+                <span id="routerStatusBadge" class="status-badge pending">检查中</span>
+              </article>
+              <article class="check-row" id="configStatusCard">
+                <div class="check-row-icon"><span class="icon" data-icon="fileCheck"></span></div>
+                <div class="check-row-copy">
+                  <strong id="configStatusTitle">正在检测 Codex 配置</strong>
+                  <small id="configStatusDetail">请稍候</small>
+                </div>
+                <span id="configStatusBadge" class="status-badge pending">检查中</span>
+              </article>
+            </div>
+          </section>
+
+          <section class="current-config" aria-labelledby="currentConfigTitle">
+            <div class="section-title-row">
+              <div>
+                <h2 id="currentConfigTitle">当前服务</h2>
+                <p>仅作用于 ChatGPT 中的 Codex 功能。</p>
+              </div>
+              <div class="section-actions">
+                <button id="restoreConfigButton" class="ghost-button hidden" type="button">
+                  <span class="icon" data-icon="rotateCcw"></span><span>恢复上次配置</span>
+                </button>
+                <button id="editConfigButton" class="secondary-button" type="button">修改配置</button>
+              </div>
+            </div>
+            <dl class="config-list">
+              <div><dt>Router</dt><dd id="currentGateway">未配置</dd></div>
+              <div><dt>默认模型</dt><dd id="currentModel">未配置</dd></div>
+              <div><dt>访问凭证</dt><dd id="currentKeyState">未配置</dd></div>
+            </dl>
+          </section>
+        </section>
+
+        <section id="setupView" class="view" data-view-panel="setup">
+          <div id="setupFormPanel">
+            <div class="compact-stepper" aria-label="配置步骤">
+              <span class="active" data-form-step="connect"><b>1</b>连接服务</span>
+              <i></i>
+              <span data-form-step="model"><b>2</b>选择模型</span>
+              <i></i>
+              <span data-form-step="apply"><b>3</b>应用并验证</span>
+            </div>
+
+            <form id="routerForm" class="router-form">
+              <section class="form-section">
+                <div class="section-heading">
+                  <div>
+                    <span class="section-kicker">步骤 1</span>
+                    <h2>连接模型服务</h2>
+                    <p>填写 OpenAI 兼容服务地址，助手会自动规范为 <code>/v1</code>。</p>
+                  </div>
+                  <button id="ollamaPresetButton" type="button" class="text-button" data-preset="ollama">
+                    填写本机 Ollama 地址
+                  </button>
+                </div>
+
+                <label class="field full-field" for="gatewayInput">
+                  <span>Router URL</span>
+                  <div class="input-action-row">
+                    <span class="input-shell"><span class="icon" data-icon="link"></span><input id="gatewayInput" value="http://127.0.0.1:11434/v1" autocomplete="url" spellcheck="false" /></span>
+                    <button id="testRouterButton" class="secondary-button" type="button">
+                      <span class="icon" data-icon="plug"></span><span>测试并读取模型</span>
+                    </button>
+                  </div>
+                  <small id="gatewayHelp">支持 HTTP/HTTPS；正式服务建议使用 HTTPS。</small>
+                </label>
+
+                <div class="auth-row">
+                  <div class="field-group">
+                    <div class="field-label-row">
+                      <label for="keyInput">Access Key</label>
+                      <label class="switch-control">
+                        <input id="noAuthInput" type="checkbox" checked />
+                        <span class="switch-track"></span>
+                        <span>该服务无需 Key</span>
+                      </label>
+                    </div>
+                    <div class="input-shell secret-input disabled" id="keyShell">
+                      <span class="icon" data-icon="key"></span>
+                      <input id="keyInput" type="password" autocomplete="off" disabled placeholder="无需填写" />
+                      <button id="toggleKeyButton" class="inline-icon-button" type="button" title="显示 Access Key" aria-label="显示 Access Key" disabled>
+                        <span class="icon" data-icon="eye"></span>
+                      </button>
+                    </div>
+                    <small id="keyHelp">使用当前 Windows 用户 DPAPI 加密，不写入 Codex 配置文件。</small>
+                  </div>
+                </div>
+
+                <div id="connectionResult" class="connection-result neutral">
+                  <span class="icon" data-icon="info"></span>
+                  <span>填写服务信息后测试连接。</span>
+                </div>
+              </section>
+
+              <section id="modelSection" class="form-section model-section locked">
+                <div class="section-heading">
+                  <div>
+                    <span class="section-kicker">步骤 2</span>
+                    <h2>选择默认模型</h2>
+                    <p id="modelSectionHelp">连接成功后可选择 Router 返回的真实模型。</p>
+                  </div>
+                  <span id="modelCountBadge" class="status-badge neutral">尚未连接</span>
+                </div>
+                <label class="field-group model-field" for="modelInput">
+                  <span>默认模型</span>
+                  <span class="select-shell">
+                    <span class="icon" data-icon="cpu"></span>
+                    <select id="modelInput" disabled>
+                      <option value="">请先测试连接</option>
+                    </select>
+                  </span>
+                  <small>该模型会显示在 ChatGPT 的 Codex 工作界面中。</small>
+                </label>
+              </section>
+
+              <div class="form-footer">
+                <div class="official-note"><span class="icon" data-icon="shieldCheck"></span><span>ChatGPT 缺失时仅调用 Microsoft Store 官方安装渠道。配置完成前不会启动 ChatGPT。</span></div>
+                <button id="applyButton" class="primary-button" type="submit" disabled>
+                  <span>应用并验证</span><span class="icon" data-icon="arrowRight"></span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <section id="progressPanel" class="progress-panel hidden" aria-live="polite">
+            <div class="progress-heading">
+              <div>
+                <span id="progressKicker">正在配置</span>
+                <h2 id="progressTitle">准备 ChatGPT 与 Codex</h2>
+                <p id="progressSubtitle">请保持窗口打开，完成前不会启动 ChatGPT。</p>
+              </div>
+              <strong id="progressPercent">0%</strong>
+            </div>
+            <div class="progress-track"><div id="progressBar"></div></div>
+            <div id="taskList" class="task-list"></div>
+            <details id="progressLog" class="log-disclosure">
+              <summary><span><span class="icon" data-icon="terminal"></span>技术日志</span><span class="icon chevron" data-icon="chevronDown"></span></summary>
+              <pre id="logOutput"></pre>
+              <div class="log-toolbar">
+                <span id="logCount">0 行</span>
+                <div><button id="copyLogButton" type="button">复制</button><button id="exportLogButton" type="button">导出</button></div>
+              </div>
+            </details>
+          </section>
+
+          <section id="resultPanel" class="result-panel hidden" aria-live="polite">
+            <div id="resultMark" class="result-mark success"><span class="icon" data-icon="check"></span></div>
+            <h2 id="resultTitle">配置完成</h2>
+            <p id="resultText">ChatGPT、Codex 配置和 Router 已全部通过检查。</p>
+            <div id="resultSummary" class="result-summary"></div>
+            <div class="result-actions">
+              <button id="launchButton" class="primary-button" type="button"><span>重启并打开 ChatGPT</span><span class="icon" data-icon="externalLink"></span></button>
+              <button id="resultBackButton" class="secondary-button" type="button">返回修改</button>
+              <button id="resultLogButton" class="ghost-button" type="button">查看技术日志</button>
+            </div>
+            <small class="result-footnote">重启只在点击按钮后执行，尚未发送的 ChatGPT 输入不会被自动处理。</small>
+          </section>
+        </section>
+
+        <section id="diagnosticsView" class="view" data-view-panel="diagnostics">
+          <div class="section-intro">
+            <div>
+              <h2>诊断信息</h2>
+              <p>用于现场确认环境或向技术支持提供脱敏结果。</p>
+            </div>
+            <button id="runDiagnosticsButton" class="secondary-button" type="button"><span class="icon" data-icon="activity"></span><span>重新检查</span></button>
+          </div>
+          <div class="diagnostic-list">
+            <div><span>操作系统</span><strong id="diagPlatform">检查中</strong></div>
+            <div><span>ChatGPT</span><strong id="diagApp">检查中</strong></div>
+            <div><span>Codex 配置</span><strong id="diagConfig">检查中</strong></div>
+            <div><span>Router</span><strong id="diagRouter">检查中</strong></div>
+            <div><span>配置路径</span><code id="diagConfigPath">检查中</code></div>
+          </div>
+          <div class="diagnostic-actions">
+            <button id="diagnosticCopyButton" class="secondary-button" type="button"><span class="icon" data-icon="copy"></span><span>复制诊断信息</span></button>
+            <button id="diagnosticRestoreButton" class="secondary-button" type="button" disabled><span class="icon" data-icon="rotateCcw"></span><span>恢复上次配置</span></button>
+          </div>
+        </section>
+
+        <section id="appearanceView" class="view" data-view-panel="appearance">
+          <div class="section-intro">
+            <div>
+              <h2>ChatGPT 主题换肤</h2>
+              <p>切换工作界面或导入自己的背景，不影响 Router 与 Codex 配置。</p>
+            </div>
+            <span id="appearanceStatus" class="status-badge neutral">正在准备</span>
+          </div>
+          <div class="appearance-grid">
+            <button class="theme-card selected" type="button" data-theme="official">
+              <span class="theme-preview official-preview"><i></i><i></i><i></i></span>
+              <span><strong>官方外观</strong><small>保持 ChatGPT 默认界面</small></span>
+              <span class="theme-check icon" data-icon="check"></span>
+            </button>
+            <button class="theme-card" type="button" data-theme="focus">
+              <span class="theme-preview focus-preview"><i></i><i></i><i></i></span>
+              <span><strong>专注深色</strong><small>低干扰工作界面</small></span>
+              <span class="theme-check icon" data-icon="check"></span>
+            </button>
+            <button id="customThemeCard" class="theme-card" type="button" data-theme="custom">
+              <span id="customThemePreview" class="theme-preview custom-preview"><span class="icon" data-icon="image"></span></span>
+              <span><strong>自定义背景</strong><small id="customThemeLabel">选择一张本地图片</small></span>
+              <span class="theme-check icon" data-icon="check"></span>
+            </button>
+          </div>
+          <div class="theme-import-row">
+            <button id="chooseBackgroundButton" class="secondary-button" type="button"><span class="icon" data-icon="image"></span><span>选择背景图片</span></button>
+            <span>支持 PNG、JPEG、WebP，最大 8 MB；建议使用 16:9 纯背景图。</span>
+            <input id="backgroundFileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          </div>
+          <div class="banner neutral appearance-note">
+            <span class="icon" data-icon="info"></span>
+            <span id="appearanceMessage">主题只在从助手启动的 ChatGPT 会话中生效，可随时恢复官方外观。</span>
+          </div>
+          <div class="appearance-actions">
+            <span>应用主题会重启 ChatGPT，请先保存尚未发送的内容。</span>
+            <button id="applyAppearanceButton" class="primary-button" type="button">应用并重启 ChatGPT</button>
+          </div>
+        </section>
+
+        <div id="actionToast" class="action-toast" aria-live="polite"></div>
+      </main>
+    </div>
+
+    <div id="confirmOverlay" class="modal-backdrop hidden">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+        <div id="confirmIcon" class="confirm-icon"><span class="icon" data-icon="info"></span></div>
+        <h2 id="confirmTitle">确认操作</h2>
+        <p id="confirmMessage"></p>
+        <div class="confirm-actions">
+          <button id="confirmCancelButton" class="secondary-button" type="button">取消</button>
+          <button id="confirmAcceptButton" class="primary-button" type="button">确认</button>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="./main.js?v=0.8.4"></script>
+  </body>
+</html>

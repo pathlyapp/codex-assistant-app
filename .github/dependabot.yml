@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /tauri-gui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: cargo
+    directory: /tauri-gui/src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

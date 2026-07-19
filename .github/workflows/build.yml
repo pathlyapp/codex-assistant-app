@@ -1,0 +1,116 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tauri-gui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tauri-gui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri-gui/src-tauri -> target
+      - run: npm ci
+      - run: node tools/check-version.mjs
+      - run: npm run build:windows
+      - name: Stage installer
+        shell: pwsh
+        env:
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer was not produced" }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item $installer.FullName "artifact/CodexAssistant-$version-windows-$env:RELEASE_ARCH-setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-assistant-windows-${{ matrix.arch }}
+          path: tauri-gui/artifact/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tauri-gui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tauri-gui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri-gui/src-tauri -> target
+      - run: npm ci
+      - run: node tools/check-version.mjs
+      - run: npm run build:mac
+      - name: Stage application bundle
+        run: |
+          version=$(node -p "require('./package.json').version")
+          app=$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$app"
+          mkdir -p artifact
+          ditto -c -k --sequesterRsrc --keepParent "$app" "artifact/CodexAssistant-${version}-macos-arm64.app.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-assistant-macos-arm64
+          path: tauri-gui/artifact/*
+          if-no-files-found: error
+
+  release-bundle:
+    name: Assemble release bundle
+    needs:
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: codex-assistant-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate manifest and checksums
+        run: |
+          version=$(node -p "require('./tauri-gui/package.json').version")
+          node tauri-gui/tools/generate-release-manifest.mjs --version "$version" --input release-assets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-assistant-release-bundle
+          path: release-assets/*
+          if-no-files-found: error

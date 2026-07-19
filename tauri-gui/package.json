@@ -1,0 +1,16 @@
+{
+  "name": "codex-assistant",
+  "version": "0.8.4",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:mac": "tauri build --bundles app",
+    "build:windows": "tauri build --bundles nsis",
+    "build:all": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
