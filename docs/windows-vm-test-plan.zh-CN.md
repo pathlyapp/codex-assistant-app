@@ -65,6 +65,23 @@ MSVC/Windows SDK。不要在 macOS 与 Windows 之间共用同一个 Cargo `targ
   `action_required/models_verified/ready=false`。
 - 故障服务恢复为正常模式后，同一用户直接重试成功并重新进入 `ready`。
 
+同日应用源提交 `595dbdc` 的 M4 配置事务候选证据：
+
+- Windows ARM64/x64 目标测试均为 45 passed、0 failed、1 ignored。
+- ARM64 SHA256：
+  `15160a53519c6c169a556b01308ef98dc6ad5a9e5299b4296248626c7849f88f`。
+- x64 SHA256：
+  `8ff8178ed8161ac373342e2192a53d283e522a408a7463991aa0edf3a15ea160`。
+- ARM64 原生和 x64 兼容层安装冒烟均通过；最终恢复 ARM64 原生安装。真实 x64
+  机器仍是发布门禁。
+- 正常 UI E2E 核对事务 manifest 的 schema、transaction ID、操作、应用版本、四个
+  受管文件和已有文件 SHA256；提交后活动 journal 已删除。
+- `verify-models-fail` 在 Responses 完成后让最终 `/models` 返回 503，setup 稳定停在
+  `verify`；`config.toml`、运行状态、模型目录和加密 Key 的存在状态/SHA256 全部恢复，
+  事务为 `rolled_back`，活动 journal 已删除。
+- Router 恢复后同一用户无需清理直接重试成功；`-TestRestore` 通过并生成独立
+  `operation=restore` 的已提交事务。
+
 M3 起不再使用只实现 `/models` 的临时服务。macOS 宿主机可在 Parallels 专用网卡
 地址上启动仓库内受控 Router：
 
@@ -96,6 +113,27 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows-e2e.ps1 `
 该模式要求测试前已有相同 Router/模型的可信 Responses 证据，用于证明重新验证失败会
 撤销旧证据但不会改写现有 Codex 配置。每个失败场景后必须恢复正常 Router 并运行一次
 无 `-ExpectSetupFailure` 的 E2E，证明用户可直接重试恢复。
+
+写入后自动回滚验收：
+
+```bash
+python3 tools/router-test-server.py \
+  --host 10.211.55.2 \
+  --port 11435 \
+  --model codex-assistant-test \
+  --mode verify-models-fail
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows-e2e.ps1 `
+  -RouterUrl http://10.211.55.2:11435/v1 `
+  -ExpectRollback
+```
+
+该模式要求测试前已有可信 Responses 配置。脚本必须验证失败步骤为 `verify`、四个受管
+文件指纹与操作前一致、事务 manifest 为 `rolled_back`、活动 journal 已删除，且
+`SystemStatusV1.config.lastTransactionId` 指向本次回滚。完成后恢复 normal Router，
+再运行普通 E2E 和 `-TestRestore`，证明无需人工清理即可重试且恢复本身可撤销。
 
 标准产物：
 
@@ -186,6 +224,10 @@ python3 tauri-gui/tools/parallels-ollama-proxy.py uninstall
 6. 观察六个阶段依次完成，其中“读取 Router 模型”和“验证实际请求”必须分开显示。
 7. 完成前 ChatGPT 不得启动。
 8. 完成页点击“重启并打开 ChatGPT”，确认弹窗后才允许关闭并重新启动应用。
+
+第 5 步写入前必须生成事务快照；第 6 步最终复核失败时允许追加第七个
+`rollback` 阶段。只有 rollback 为 `restored` 或原事务成功提交后才能结束操作；
+`ROLLBACK_FAILED` 必须阻断 ready 并保留 manifest/活动 journal。
 
 再次修改配置后，首页应出现“恢复上次配置”。点击后必须先快照当前状态，完整恢复上次的 `config.toml`、运行状态、模型目录和可选 DPAPI Key，并在用户确认后重启 ChatGPT。
 

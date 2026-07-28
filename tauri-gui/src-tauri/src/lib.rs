@@ -18,10 +18,12 @@ use url::Url;
 
 use std::io::{Cursor, Read};
 
+mod config_transaction;
 mod contracts;
 mod router_client;
 mod token_support;
 
+use config_transaction::{ConfigTransaction, ManagedFile};
 use contracts::{
     new_operation_id, ErrorEnvelopeV1, SetupStageV1, StageEventV1, StageStatusV1,
     SystemStatusInput, SystemStatusV1, SCHEMA_VERSION_V1,
@@ -400,6 +402,8 @@ struct InstallState {
     responses_verified_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     responses_protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transaction_id: Option<String>,
     installed_at: String,
 }
 
@@ -446,11 +450,13 @@ struct TokenHelperCommand {
     args: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct InstallContext {
+    operation_id: String,
     options: SetupOptions,
     models: Vec<String>,
     responses_probe: Option<ResponsesProbeResult>,
+    transaction: Option<ConfigTransaction>,
 }
 
 #[derive(Clone, Debug)]
@@ -625,6 +631,17 @@ async fn list_gallery_themes() -> Result<Vec<GalleryThemeInfo>, ErrorEnvelopeV1>
 
 fn collect_system_status() -> Result<SystemStatusV1, String> {
     let paths = resolve_paths()?;
+    let managed_files = managed_configuration_files(&paths);
+    let recovery_failed = config_transaction::recover_interrupted(
+        &paths.install_root,
+        &managed_files,
+        &rfc3339_timestamp()?,
+    )
+    .is_err()
+        || config_transaction::active_transaction_failed(&paths.install_root);
+    let last_transaction = config_transaction::last_transaction(&paths.install_root)
+        .ok()
+        .flatten();
     let app = detect_chatgpt_app()?;
     let state = read_state(&paths).ok();
     let config_present = state
@@ -658,7 +675,10 @@ fn collect_system_status() -> Result<SystemStatusV1, String> {
         .as_ref()
         .and_then(|saved| saved.responses_verified_at.clone());
 
-    let backup_available = latest_configuration_snapshot(&paths)?.is_some();
+    let backup_available =
+        config_transaction::latest_committed_snapshot(&paths.install_root, &managed_files)?
+            .is_some()
+            || latest_configuration_snapshot(&paths)?.is_some();
     Ok(SystemStatusV1::from_input(SystemStatusInput {
         platform: platform_name().to_string(),
         architecture: std::env::consts::ARCH.to_string(),
@@ -679,6 +699,8 @@ fn collect_system_status() -> Result<SystemStatusV1, String> {
             .map(|saved| saved.token_mode != "none")
             .unwrap_or(false),
         backup_available,
+        last_transaction_id: last_transaction.map(|transaction| transaction.transaction_id),
+        transaction_recovery_failed: recovery_failed,
     }))
 }
 
@@ -736,9 +758,11 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
         (SetupStageV1::Verify, "复核配置", verify_setup),
     ];
     let mut ctx = InstallContext {
+        operation_id: operation_id.clone(),
         options,
         models: Vec::new(),
         responses_probe: None,
+        transaction: None,
     };
     let mut results = Vec::new();
     let mut success = true;
@@ -774,7 +798,7 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
             }
             Err(error) => {
                 emit_log(&app, format!("[FAIL] {}\n", redact_error(&error)));
-                let envelope = command_error(setup_error_stage(*stage), error);
+                let envelope = command_error(setup_error_stage(*stage), &error);
                 let event = running
                     .transition(
                         StageStatusV1::Failed,
@@ -789,6 +813,66 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
                 success = false;
                 summary = envelope.title.clone();
                 failure = Some(envelope);
+                if let Some(transaction) = ctx.transaction.as_mut() {
+                    let transaction_id = transaction.transaction_id().to_string();
+                    let manifest_path = transaction.manifest_path().to_string_lossy().to_string();
+                    let rollback_running = StageEventV1::running(
+                        &operation_id,
+                        SetupStageV1::Rollback,
+                        "自动恢复配置",
+                        "正在恢复写入前的配置",
+                        stages.len(),
+                        stages.len(),
+                        false,
+                        json!({
+                            "transactionId": transaction_id,
+                            "manifestPath": manifest_path,
+                        }),
+                    );
+                    emit_stage_event(&app, &rollback_running);
+                    emit_log(&app, "[ROLLBACK] Restoring configuration snapshot\n");
+                    let completed_at = rfc3339_timestamp().unwrap_or_else(|_| unix_timestamp());
+                    match transaction.rollback(&completed_at, &redact_error(&error)) {
+                        Ok(()) => {
+                            let rollback_event = rollback_running
+                                .transition(
+                                    StageStatusV1::Restored,
+                                    "已自动恢复写入前的配置",
+                                    false,
+                                    true,
+                                    json!({
+                                        "transactionId": transaction_id,
+                                        "manifestPath": manifest_path,
+                                    }),
+                                )
+                                .expect("rollback stage must transition to restored");
+                            emit_stage_event(&app, &rollback_event);
+                            emit_log(&app, "[ROLLBACK] Configuration restored\n");
+                            results.push(rollback_event);
+                        }
+                        Err(rollback_error) => {
+                            emit_log(
+                                &app,
+                                format!("[ROLLBACK FAILED] {}\n", redact_error(&rollback_error)),
+                            );
+                            let rollback_envelope = command_error("rollback", &rollback_error);
+                            let rollback_event = rollback_running
+                                .transition(
+                                    StageStatusV1::Failed,
+                                    rollback_envelope.message.clone(),
+                                    false,
+                                    false,
+                                    json!({ "error": rollback_envelope.clone() }),
+                                )
+                                .expect("rollback stage must transition to failed");
+                            emit_stage_event(&app, &rollback_event);
+                            results.push(rollback_event);
+                            summary = rollback_envelope.title.clone();
+                            failure = Some(rollback_envelope);
+                        }
+                    }
+                    ctx.transaction = None;
+                }
                 break;
             }
         }
@@ -798,7 +882,16 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
         schema_version: SCHEMA_VERSION_V1,
         operation_id,
         success,
-        code: Some(if success { 0 } else { 1 }),
+        code: Some(if success {
+            0
+        } else if failure
+            .as_ref()
+            .is_some_and(|error| error.code == "ROLLBACK_FAILED")
+        {
+            2
+        } else {
+            1
+        }),
         summary,
         stages: results,
         error: failure,
@@ -823,6 +916,19 @@ fn preflight_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
         .map_err(|error| format!("创建助手数据目录失败: {error}"))?;
     if let Some(parent) = paths.codex_config_path.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("创建 Codex 配置目录失败: {error}"))?;
+    }
+    if let Some(recovered) = config_transaction::recover_interrupted(
+        &paths.install_root,
+        &managed_configuration_files(&paths),
+        &rfc3339_timestamp()?,
+    )? {
+        emit_log(
+            app,
+            format!(
+                "[RECOVERY] Interrupted transaction {} restored\n",
+                recovered.transaction_id
+            ),
+        );
     }
     emit_log(
         app,
@@ -982,7 +1088,20 @@ fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<Stage
         .filter(|probe| probe.completed && probe.model == ctx.options.model)
         .ok_or_else(|| "Responses 验证未完成，已停止写入配置".to_string())?;
     let paths = resolve_paths()?;
-    create_configuration_snapshot(&paths)?;
+    let managed_files = managed_configuration_files(&paths);
+    let transaction = ConfigTransaction::begin(
+        &paths.install_root,
+        &ctx.operation_id,
+        "configure",
+        &rfc3339_timestamp()?,
+        VERSION,
+        &managed_files,
+    )?;
+    ctx.transaction = Some(transaction);
+    ctx.transaction
+        .as_mut()
+        .expect("configuration transaction was just created")
+        .mark_writing()?;
     let existing = read_state(&paths).ok();
     let token = prepare_token(&paths, &ctx.options, existing.as_ref())?;
     let mut state = InstallState {
@@ -1001,6 +1120,7 @@ fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<Stage
         model_catalog_path: None,
         responses_verified_at: Some(rfc3339_timestamp()?),
         responses_protocol: Some(probe.protocol.clone()),
+        transaction_id: Some(ctx.operation_id.clone()),
         installed_at: unix_timestamp(),
     };
     let catalog = write_model_catalog(&paths, &state)?;
@@ -1023,11 +1143,12 @@ fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<Stage
             "keyProtected": state.token_mode != "none",
             "responsesVerifiedAt": state.responses_verified_at,
             "responsesProtocol": state.responses_protocol,
+            "transactionId": state.transaction_id,
         })),
     )
 }
 
-fn verify_setup(app: &AppHandle, _ctx: &mut InstallContext) -> Result<StageOutcome, String> {
+fn verify_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOutcome, String> {
     let paths = resolve_paths()?;
     let state = read_state(&paths).map_err(|error| format!("读取助手状态失败: {error}"))?;
     if !codex_config_matches(&paths.codex_config_path, &state) {
@@ -1045,6 +1166,13 @@ fn verify_setup(app: &AppHandle, _ctx: &mut InstallContext) -> Result<StageOutco
     if !app_info.installed {
         return Err("配置复核时未检测到 ChatGPT".to_string());
     }
+    let transaction = ctx
+        .transaction
+        .as_mut()
+        .ok_or_else(|| "配置复核缺少活动事务".to_string())?;
+    let transaction_id = transaction.transaction_id().to_string();
+    transaction.commit(&rfc3339_timestamp()?)?;
+    ctx.transaction = None;
     emit_log(app, "[OK] ChatGPT package verified\n");
     emit_log(app, "[OK] Codex config verified\n");
     emit_log(app, "[OK] Router connection verified\n");
@@ -1053,6 +1181,7 @@ fn verify_setup(app: &AppHandle, _ctx: &mut InstallContext) -> Result<StageOutco
             "app": app_info.name,
             "gateway": state.gateway_base_url,
             "model": state.model,
+            "transactionId": transaction_id,
         })),
     )
 }
@@ -1288,12 +1417,6 @@ fn restart_chatgpt_inner() -> Result<(), String> {
     launch_chatgpt_preferred()
 }
 
-fn snapshot_manifest_path(paths: &InstallerPaths, timestamp: &str) -> PathBuf {
-    paths
-        .install_root
-        .join(format!("snapshot.{timestamp}.json"))
-}
-
 fn snapshot_backup_path(path: &Path, timestamp: &str) -> Result<PathBuf, String> {
     let parent = path
         .parent()
@@ -1305,50 +1428,16 @@ fn snapshot_backup_path(path: &Path, timestamp: &str) -> Result<PathBuf, String>
     Ok(parent.join(format!("{file_name}.bak.{timestamp}")))
 }
 
-fn next_snapshot_timestamp(paths: &InstallerPaths) -> String {
-    let mut timestamp = unix_timestamp().parse::<u64>().unwrap_or(0);
-    loop {
-        let candidate = timestamp.to_string();
-        if !snapshot_manifest_path(paths, &candidate).exists() {
-            return candidate;
-        }
-        timestamp += 1;
-    }
-}
-
-fn backup_snapshot_file(path: &Path, timestamp: &str) -> Result<bool, String> {
-    if !path.is_file() {
-        return Ok(false);
-    }
-    let backup = snapshot_backup_path(path, timestamp)?;
-    fs::copy(path, &backup).map_err(|error| format!("备份 {} 失败: {error}", path.display()))?;
-    Ok(true)
-}
-
-fn create_configuration_snapshot(paths: &InstallerPaths) -> Result<PathBuf, String> {
-    fs::create_dir_all(&paths.install_root)
-        .map_err(|error| format!("创建配置快照目录失败: {error}"))?;
-    if let Some(parent) = paths.codex_config_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("创建 Codex 配置目录失败: {error}"))?;
-    }
-    let timestamp = next_snapshot_timestamp(paths);
-    let state_path = paths.install_root.join("config.json");
-    let models_path = paths.install_root.join("models.json");
-    let key_path = paths.install_root.join("router-key.secret");
-    let snapshot = ConfigurationSnapshot {
-        version: VERSION.to_string(),
-        timestamp: timestamp.clone(),
-        codex_config_existed: backup_snapshot_file(&paths.codex_config_path, &timestamp)?,
-        state_existed: backup_snapshot_file(&state_path, &timestamp)?,
-        models_existed: backup_snapshot_file(&models_path, &timestamp)?,
-        key_existed: backup_snapshot_file(&key_path, &timestamp)?,
-    };
-    let manifest_path = snapshot_manifest_path(paths, &timestamp);
-    let data = serde_json::to_string_pretty(&snapshot)
-        .map_err(|error| format!("生成配置快照失败: {error}"))?;
-    fs::write(&manifest_path, format!("{data}\n"))
-        .map_err(|error| format!("写入配置快照失败: {error}"))?;
-    Ok(manifest_path)
+fn managed_configuration_files(paths: &InstallerPaths) -> Vec<ManagedFile> {
+    vec![
+        ManagedFile::new("codex-config", paths.codex_config_path.clone()),
+        ManagedFile::new("runtime-state", paths.install_root.join("config.json")),
+        ManagedFile::new("model-catalog", paths.install_root.join("models.json")),
+        ManagedFile::new(
+            "router-secret",
+            paths.install_root.join("router-key.secret"),
+        ),
+    ]
 }
 
 fn latest_configuration_snapshot(
@@ -1396,9 +1485,71 @@ fn restore_snapshot_file(path: &Path, timestamp: &str, existed: bool) -> Result<
 }
 
 fn restore_configuration_snapshot(paths: &InstallerPaths) -> Result<RestoreResult, String> {
-    let (_, manifest_path, snapshot) = latest_configuration_snapshot(paths)?
-        .ok_or_else(|| "没有可恢复的完整配置快照".to_string())?;
-    create_configuration_snapshot(paths)?;
+    let managed_files = managed_configuration_files(paths);
+    config_transaction::recover_interrupted(
+        &paths.install_root,
+        &managed_files,
+        &rfc3339_timestamp()?,
+    )?;
+    let current_snapshot =
+        config_transaction::latest_committed_snapshot(&paths.install_root, &managed_files)?;
+    let legacy_snapshot = if current_snapshot.is_none() {
+        latest_configuration_snapshot(paths)?
+    } else {
+        None
+    };
+    if current_snapshot.is_none() && legacy_snapshot.is_none() {
+        return Err("没有可恢复的完整配置快照".to_string());
+    }
+
+    let transaction_id = new_operation_id();
+    let mut transaction = ConfigTransaction::begin(
+        &paths.install_root,
+        &transaction_id,
+        "restore",
+        &rfc3339_timestamp()?,
+        VERSION,
+        &managed_files,
+    )?;
+    transaction.mark_writing()?;
+    let restored_from = if let Some((manifest_path, manifest)) = current_snapshot {
+        config_transaction::restore_snapshot(&manifest_path, &manifest, &managed_files)
+            .map(|_| manifest_path)
+    } else {
+        let (_, manifest_path, snapshot) =
+            legacy_snapshot.expect("legacy snapshot was checked above");
+        restore_legacy_configuration_snapshot(paths, &snapshot).map(|_| manifest_path)
+    };
+    match restored_from {
+        Ok(manifest_path) => {
+            if let Err(commit_error) = transaction.commit(&rfc3339_timestamp()?) {
+                return match transaction
+                    .rollback(&rfc3339_timestamp()?, &redact_error(&commit_error))
+                {
+                    Ok(()) => Err(format!("提交恢复事务失败，已撤销本次操作: {commit_error}")),
+                    Err(rollback_error) => Err(rollback_error),
+                };
+            }
+            Ok(RestoreResult {
+                restored_from: manifest_path.to_string_lossy().to_string(),
+                message: "已恢复最近一次完整配置；重新打开 ChatGPT 后生效".to_string(),
+            })
+        }
+        Err(error) => {
+            let rollback_result =
+                transaction.rollback(&rfc3339_timestamp()?, &redact_error(&error));
+            match rollback_result {
+                Ok(()) => Err(format!("恢复配置失败，已撤销本次操作: {error}")),
+                Err(rollback_error) => Err(rollback_error),
+            }
+        }
+    }
+}
+
+fn restore_legacy_configuration_snapshot(
+    paths: &InstallerPaths,
+    snapshot: &ConfigurationSnapshot,
+) -> Result<(), String> {
     let state_path = paths.install_root.join("config.json");
     let models_path = paths.install_root.join("models.json");
     let key_path = paths.install_root.join("router-key.secret");
@@ -1409,11 +1560,7 @@ fn restore_configuration_snapshot(paths: &InstallerPaths) -> Result<RestoreResul
     )?;
     restore_snapshot_file(&state_path, &snapshot.timestamp, snapshot.state_existed)?;
     restore_snapshot_file(&models_path, &snapshot.timestamp, snapshot.models_existed)?;
-    restore_snapshot_file(&key_path, &snapshot.timestamp, snapshot.key_existed)?;
-    Ok(RestoreResult {
-        restored_from: manifest_path.to_string_lossy().to_string(),
-        message: "已恢复最近一次完整配置；重新打开 ChatGPT 后生效".to_string(),
-    })
+    restore_snapshot_file(&key_path, &snapshot.timestamp, snapshot.key_existed)
 }
 
 fn restore_codex_config_inner() -> Result<RestoreResult, String> {
@@ -3179,7 +3326,7 @@ fn prepare_token(
     }
     if !options.key.is_empty() {
         let (protected, storage) = token_support::protect_gateway_secret(&options.key)?;
-        fs::write(&key_path, protected)
+        config_transaction::atomic_write(&key_path, &protected)
             .map_err(|error| format!("安全保存 Access Key 失败: {error}"))?;
         return Ok(TokenPrep {
             token_mode: "static".to_string(),
@@ -3257,7 +3404,10 @@ fn write_model_catalog(paths: &InstallerPaths, state: &InstallState) -> Result<P
         .collect::<Vec<_>>();
     let data = serde_json::to_string_pretty(&json!({ "models": models }))
         .map_err(|error| format!("生成模型目录失败: {error}"))?;
-    fs::write(&path, format!("{data}\n")).map_err(|error| format!("写入模型目录失败: {error}"))?;
+    serde_json::from_str::<serde_json::Value>(&data)
+        .map_err(|error| format!("校验模型目录失败: {error}"))?;
+    config_transaction::atomic_write(&path, format!("{data}\n").as_bytes())
+        .map_err(|error| format!("写入模型目录失败: {error}"))?;
     Ok(path)
 }
 
@@ -3266,8 +3416,13 @@ fn write_state(paths: &InstallerPaths, state: &InstallState) -> Result<(), Strin
         .map_err(|error| format!("创建数据目录失败: {error}"))?;
     let data = serde_json::to_string_pretty(state)
         .map_err(|error| format!("生成助手状态失败: {error}"))?;
-    fs::write(paths.install_root.join("config.json"), format!("{data}\n"))
-        .map_err(|error| format!("写入助手状态失败: {error}"))
+    serde_json::from_str::<InstallState>(&data)
+        .map_err(|error| format!("校验助手状态失败: {error}"))?;
+    config_transaction::atomic_write(
+        &paths.install_root.join("config.json"),
+        format!("{data}\n").as_bytes(),
+    )
+    .map_err(|error| format!("写入助手状态失败: {error}"))
 }
 
 fn read_state(paths: &InstallerPaths) -> Result<InstallState, String> {
@@ -3342,7 +3497,11 @@ fn write_codex_config(
     if !output.ends_with('\n') {
         output.push('\n');
     }
-    fs::write(path, output).map_err(|error| format!("写入 Codex 配置失败: {error}"))
+    output
+        .parse::<DocumentMut>()
+        .map_err(|error| format!("写入前校验 Codex 配置失败: {error}"))?;
+    config_transaction::atomic_write(path, output.as_bytes())
+        .map_err(|error| format!("写入 Codex 配置失败: {error}"))
 }
 
 fn remove_managed_blocks(content: &str) -> String {
@@ -3931,12 +4090,25 @@ mod tests {
         fs::write(&state_path, "old state\n").expect("write old state");
         fs::write(&models_path, "old models\n").expect("write old models");
         fs::write(&key_path, b"old key").expect("write old key");
-        create_configuration_snapshot(&paths).expect("create snapshot");
+        let managed_files = managed_configuration_files(&paths);
+        let mut transaction = ConfigTransaction::begin(
+            &paths.install_root,
+            "snapshot-test",
+            "configure",
+            "2026-07-28T10:00:00Z",
+            VERSION,
+            &managed_files,
+        )
+        .expect("create snapshot");
+        transaction.mark_writing().expect("mark writing");
 
         fs::write(&paths.codex_config_path, "model = 'new'\n").expect("write new config");
         fs::write(&state_path, "new state\n").expect("write new state");
         fs::write(&models_path, "new models\n").expect("write new models");
         fs::write(&key_path, b"new key").expect("write new key");
+        transaction
+            .commit("2026-07-28T10:00:01Z")
+            .expect("commit transaction");
         restore_configuration_snapshot(&paths).expect("restore snapshot");
 
         assert_eq!(
@@ -3952,6 +4124,21 @@ mod tests {
             "old models\n"
         );
         assert_eq!(fs::read(&key_path).expect("read key"), b"old key");
+
+        restore_configuration_snapshot(&paths).expect("undo restore");
+        assert_eq!(
+            fs::read_to_string(&paths.codex_config_path).expect("read config"),
+            "model = 'new'\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&state_path).expect("read state"),
+            "new state\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&models_path).expect("read models"),
+            "new models\n"
+        );
+        assert_eq!(fs::read(&key_path).expect("read key"), b"new key");
 
         fs::remove_dir_all(root).expect("cleanup test directory");
     }
@@ -4190,6 +4377,7 @@ model = "gpt-5"
             model_catalog_path: Some(root.join("models.json").to_string_lossy().to_string()),
             responses_verified_at: Some(unix_timestamp()),
             responses_protocol: Some("sse".to_string()),
+            transaction_id: Some("test-transaction".to_string()),
             installed_at: unix_timestamp(),
         };
         let helper = TokenHelperCommand {
@@ -4226,6 +4414,7 @@ model = "gpt-5"
             model_catalog_path: None,
             responses_verified_at: Some("2026-07-28T10:00:00Z".to_string()),
             responses_protocol: Some("sse".to_string()),
+            transaction_id: Some("test-transaction".to_string()),
             installed_at: "2026-07-28T10:00:00Z".to_string(),
         };
 

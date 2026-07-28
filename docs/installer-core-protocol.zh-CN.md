@@ -35,7 +35,9 @@ V1 同时保留 0.8.x 扁平字段一个兼容周期。前端适配器只允许�
 - 已配置 Router/模型。
 - Router `/v1/models` 是否真实可访问，以及最近一次 `/v1/responses` 验证时间。
 - Key 是否已配置，不返回 Key 内容。
-- 是否存在可恢复的 `config.toml.bak.<timestamp>`。
+- 是否存在可恢复的已提交事务快照。
+- 最近事务 ID；中断事务无法恢复时，配置状态为 `rollback_failed`，整体状态为
+  `blocked`，主动作进入诊断。
 
 ### `discover_models(request)`
 
@@ -68,12 +70,25 @@ preflight
   `/v1/responses` 流请求；要求收到结构有效、模型一致的 `response.completed`，不保存
   输出正文。
 - `configure_codex`：加密 Key、写状态/model catalog、备份并使用结构化 TOML API 更新用户级 `config.toml`；只替换助手管理的 provider，保留 ChatGPT 其它设置。
-- `verify`：重新读取状态和配置，再次请求模型列表，核对 Responses 验证证据，并再次确认官方 ChatGPT。
+- `verify`：重新读取状态和配置，再次请求模型列表，核对 Responses 验证证据，并再次确认官方 ChatGPT；全部通过后提交配置事务。
 
 任何阶段失败都会产生 `failed` 事件、`ErrorEnvelopeV1` 和非成功结果，不允许用
 warning 代替完成条件。只有 `/models` 和 `/responses` 均通过后才允许写配置并把
 Router 状态标记为 `responses_verified`；旧状态没有验证证据时只显示
 `models_verified`，整体状态不得为 `ready`。
+
+`configure_codex` 写入前必须先创建配置事务。事务覆盖用户 `config.toml`、助手运行
+状态、模型目录和可选加密 Key；在 `runtime/snapshots/<transactionId>/manifest.json`
+中记录操作、时间、助手版本、原目标路径、是否存在、备份文件及 SHA256。所有 JSON
+和 TOML 在替换前完成解析校验，使用同目录临时文件、同步落盘和原子替换。
+
+创建快照后任一阶段失败都会追加一个 `rollback` 事件：
+
+- 回滚成功：状态为 `restored`，事务为 `rolled_back`，删除活动 journal。
+- 回滚失败：最终错误切换为 `ROLLBACK_FAILED`，结果退出码为 `2`，保留活动 journal、
+  事务 manifest、目标路径和快照路径。
+- 下次调用状态或开始配置时会检测 `transaction.active.json`。未完成写入会自动回滚；
+  已落盘但尚未清理 journal 的 commit 会补写摘要后完成收口。
 
 若相同 Router URL 和模型曾通过验证，但本次 `validate_router_response` 失败，核心只
 撤销运行状态中的 `responsesVerifiedAt/responsesProtocol`，不改写既有
@@ -90,7 +105,10 @@ Router 状态标记为 `responses_verified`；旧状态没有验证证据时只�
 
 ### `restore_codex_config`
 
-恢复时间戳最新的完整快照，包括 `config.toml`、助手运行状态、模型目录和可选 DPAPI Key。恢复前先为当前状态生成一个新的完整快照，因此再次恢复可以撤销本次操作；前端随后执行用户已确认的 ChatGPT 重启。
+恢复最近的已提交事务快照，包括 `config.toml`、助手运行状态、模型目录和可选 DPAPI
+Key。恢复前先为当前状态生成 `operation=restore` 的新事务；恢复成功后提交新事务，
+失败则自动恢复操作前状态，因此再次恢复可以撤销本次操作。旧版时间戳快照只作为迁移
+回退读取。前端随后执行用户已确认的 ChatGPT 重启。
 
 ### 外观命令
 
@@ -124,6 +142,9 @@ Router 状态标记为 `responses_verified`；旧状态没有验证证据时只�
   "details": {}
 }
 ```
+
+setup 的六个主阶段失败后可能追加第七个 `rollback` 阶段。该阶段不改变前六阶段的
+`current/total`，通过稳定 `stage=rollback` 和事务 ID 记录恢复结果。
 
 `installer-log`：脱敏文本日志。
 

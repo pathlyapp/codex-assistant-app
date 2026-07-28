@@ -606,7 +606,9 @@ function renderResultSummary(success, payload) {
     addSummaryRow(summary, "模型", $("#modelInput").value);
     addSummaryRow(summary, "Access Key", $("#noAuthInput").checked ? "无需 Key" : "已安全保存");
   } else {
-    const failed = (payload.stages || []).find((stage) => stage.status === "failed");
+    const stages = payload.stages || [];
+    const failed = stages.find((stage) => stage.stage === "rollback" && stage.status === "failed")
+      || stages.find((stage) => stage.status === "failed");
     addSummaryRow(summary, "失败步骤", failed?.label || payload.summary || "启动配置");
     addSummaryRow(summary, "原因", failed?.message || payload.summary || "未知错误");
   }

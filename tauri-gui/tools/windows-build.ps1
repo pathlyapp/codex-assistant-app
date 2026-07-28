@@ -65,11 +65,14 @@ if (!(Test-Path $vcVarsAll)) {
 }
 Import-VcEnvironment $vcVarsAll $vcArchitecture
 
+$cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+$env:PATH = "$cargoBin;$env:PATH"
+
 $llvmBin = Join-Path $BuildToolsRoot "VC\Tools\Llvm\$llvmArchitecture\bin"
 if (!(Test-Path (Join-Path $llvmBin "clang.exe"))) {
   throw "LLVM for $Architecture was not found at $llvmBin"
 }
-$env:PATH = "$llvmBin;$env:USERPROFILE\.cargo\bin;$env:PATH"
+$env:PATH = "$llvmBin;$env:PATH"
 
 $installedTargets = @(& rustup target list --installed)
 if ($LASTEXITCODE -ne 0) {

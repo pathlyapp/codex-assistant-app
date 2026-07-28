@@ -7,7 +7,7 @@
 | 基线 | 标识 | 用途 |
 | --- | --- | --- |
 | 已发布基线 | `v0.8.4@2588247` | 客户可下载包、SHA256、安装与回退对照 |
-| 开发基线 | `main@571db73`，应用版本 `0.8.8` | M0/M1 代码改动和回归测试起点 |
+| 开发基线 | `main@e048346`，应用版本 `0.8.8` | M4 特性分支起点；M1/M3 已合并 |
 
 不得用开发版本号替代 Release 标签，也不得把未发布的 `main` 描述为客户可下载版本。
 
@@ -84,6 +84,12 @@
 | M3 Windows ARM64 404/断流 UI E2E | 通过 | 两类失败均停在 `validate_router_response`；Codex 配置哈希不变；旧证据撤销；状态退回 `models_verified/ready=false`；恢复正常后重试成功 |
 | M3 Windows ARM64 候选 | 通过 | `c120943`；SHA256 `12ac72e27e1a12920a1173dd80cac1a860fc402648233d424aeb32e5770f2a1b`；原生安装、静默不自启、首次响应、单实例通过 |
 | M3 Windows x64 候选 | 部分通过 | `c120943`；SHA256 `69c9ab9b885f6cff181c2e5d00dfdb717771802a23c5f01dc720062452324346`；目标测试和 ARM64 兼容层安装冒烟通过，真实 x64 待验证 |
+| M4 配置事务测试 | 通过 | macOS 宿主、Windows ARM64/x64 目标均为 45 passed，0 failed，1 ignored；覆盖提交、自动回滚、rollback failure 留痕和启动恢复 |
+| M4 Windows ARM64 候选 | 通过 | `595dbdc`；SHA256 `15160a53519c6c169a556b01308ef98dc6ad5a9e5299b4296248626c7849f88f`；原生安装冒烟通过 |
+| M4 Windows x64 候选 | 部分通过 | `595dbdc`；SHA256 `8ff8178ed8161ac373342e2192a53d283e522a408a7463991aa0edf3a15ea160`；目标测试和 ARM64 兼容层冒烟通过，真实 x64 待验证 |
+| M4 Windows ARM64 正常事务 E2E | 通过 | 四文件 manifest/SHA256 有效；事务提交；运行状态与 `SystemStatusV1` 事务 ID 一致；配置期间 ChatGPT 进程为 0 |
+| M4 Windows ARM64 自动回滚 E2E | 通过 | Responses 后最终 `/models` 注入 503；稳定停在 `verify`；四文件哈希恢复；`rolled_back`；活动 journal 删除 |
+| M4 Windows ARM64 重试/可逆恢复 E2E | 通过 | Router 恢复后无需清理直接成功；手动恢复 round-trip 生成独立 `operation=restore` 已提交事务 |
 
 首次失败不得从历史中删除。修复后的通过结果应作为新行附加到本节，而不是覆盖原始证据。
 
@@ -97,7 +103,7 @@
 | ChatGPT 已安装时跳过 | 待验证 | 部分验证 | 当前用户完整 setup 在官方 ChatGPT 已安装时通过；仍需显式 stage 断言 |
 | Router 成功 | 待验证 | 部分验证 | ARM64 当前用户通过隔离 Router 完成 `/models`、`/responses`、配置写入和 `ready` 状态；仍需真实 Ollama/LM Studio 与 x64 |
 | Router 连接拒绝/超时 | 待验证 | 部分验证 | ARM64 UI 验证 `ROUTER_VM_LOOPBACK`；Responses 404/断流验证配置不变和证据撤销；仍需模型阶段 timeout/拒绝 envelope |
-| 配置写入与恢复 | 待验证 | 部分验证 | ARM64 当前用户写入、备份入口和完整 restore round-trip 通过；仍需干净用户 |
+| 配置写入与恢复 | 待验证 | 部分验证 | ARM64 当前用户完成原子提交、验证失败自动回滚、直接重试和可逆 restore；仍需干净用户、进程中断和文件系统故障矩阵 |
 | 重复启动与重复提交 | 部分验证 | 部分验证 | 两架构候选重复启动只有一个进程；重复 setup 提交仍待验证 |
 
 测试机器记录必须包含：

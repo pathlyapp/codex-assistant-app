@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -18,6 +19,12 @@ class RouterHandler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": {"message": "not found"}})
             return
         if not self.authorized():
+            return
+        if (
+            self.server.mode == "verify-models-fail"
+            and self.server.completed_response_count() >= 1
+        ):
+            self.send_json(503, {"error": {"message": "injected verify failure"}})
             return
         self.send_json(
             200,
@@ -65,6 +72,8 @@ class RouterHandler(BaseHTTPRequestHandler):
         elif mode == "json":
             self.send_json(200, self.completed_response(self.server.model))
         else:
+            if mode == "verify-models-fail":
+                self.server.record_completed_response()
             self.send_sse(
                 [
                     {
@@ -173,6 +182,7 @@ def parse_args():
             "disconnect",
             "failed",
             "wrong-model",
+            "verify-models-fail",
         ),
         default="normal",
     )
@@ -185,6 +195,19 @@ def main():
     server.model = args.model
     server.key = args.key
     server.mode = args.mode
+    server.response_count = 0
+    server.response_count_lock = threading.Lock()
+
+    def completed_response_count():
+        with server.response_count_lock:
+            return server.response_count
+
+    def record_completed_response():
+        with server.response_count_lock:
+            server.response_count += 1
+
+    server.completed_response_count = completed_response_count
+    server.record_completed_response = record_completed_response
     print(
         f"Test Router listening at http://{args.host}:{args.port}/v1 "
         f"(model={args.model}, mode={args.mode})",

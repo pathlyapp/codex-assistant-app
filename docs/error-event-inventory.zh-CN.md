@@ -29,7 +29,7 @@
 | `CONFIG_PARSE_FAILED` | 现有配置不是有效 TOML | `configure_codex` | true | `restore_config` |
 | `CONFIG_OVERRIDDEN` | 项目或管理员配置覆盖用户配置 | `verify` | true | `show_effective_source` |
 | `CONFIG_VERIFY_FAILED` | 写入后内容、模型或应用复核失败 | `verify` | true | `restore_config` |
-| `ROLLBACK_FAILED` | 自动恢复失败 | `rollback` | false | `contact_support` |
+| `ROLLBACK_FAILED` | 自动恢复失败；活动 journal 和事务 manifest 保留 | `rollback` | false | `contact_support` |
 | `SECRET_STORE_FAILED` | DPAPI、Keychain 或 helper 失败 | `configure_codex` | true | `open_diagnostics` |
 | `PROXY_AUTH_REQUIRED` | 企业代理要求认证 | `validate_router_models` | true | `configure_proxy` |
 | `APPEARANCE_UNSUPPORTED` | 平台、版本或主题类型不支持 | `appearance_apply` | false | `open_diagnostics` |
@@ -56,13 +56,15 @@
 | 2 | `install_chatgpt` | `running/complete/skipped/failed` | 安装来源和可信结果未结构化 |
 | 3 | `validate_router` | `running/complete/failed` | `/models`、模型选择和响应大小受限 |
 | 4 | `validate_router_response` | `running/complete/failed` | SSE/JSON 完成、模型一致性和流中断已验证；相同 Router/模型失败会撤销旧验证证据但不改配置 |
-| 5 | `configure_codex` | `running/complete/failed` | transaction ID 和 rollback 事件转入 M4 |
-| 6 | `verify` | `running/complete/failed` | 复查 `/models`、配置和 Responses 验证证据 |
+| 5 | `configure_codex` | `running/complete/failed` | 快照成功后才写四个受管文件；事件包含 transaction ID |
+| 6 | `verify` | `running/complete/failed` | 从磁盘复查配置、模型和 Responses 证据；成功后提交事务 |
+| 7（按需） | `rollback` | `running/restored/failed` | 写入后失败自动恢复；失败时 `ROLLBACK_FAILED` 覆盖原错误 |
 
 当前事件字段：`schemaVersion`、`operationId`、`stage`、`label`、`status`、
 `message`、`current`、`total`、`cancellable`、`recoverable`、`details`。
 合法状态为 `waiting|running|complete|skipped|failed|restored`，非法转换已有单元
-测试阻断。
+测试阻断。`rollback` 只在快照后失败时追加，不改变六个主阶段的总数；前端必须优先
+展示 rollback 失败，不能继续显示被覆盖的原始 verify/config 错误。
 
 ## 3. 当前命令边界
 

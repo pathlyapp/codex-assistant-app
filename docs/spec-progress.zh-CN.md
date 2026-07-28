@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@35980c0` |
+| 开发基线 | `main@e048346` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m3-responses-probe` |
-| 当前 PR | [#16](https://github.com/theivanxu/codex-assistant/pull/16) |
+| 当前分支 | `feat/m4-config-transaction` |
+| 当前 PR | [#17](https://github.com/theivanxu/codex-assistant/pull/17) |
 | 当前应用版本 | `0.8.8` |
 | 下一内部候选 | `0.9.0-alpha.1` |
-| 当前主里程碑 | M0/M1 外部门禁；M3 Router 真实响应验证 |
+| 当前主里程碑 | M0/M1/M3 外部门禁；M4 配置事务 v2 |
 
 ## 里程碑状态
 
@@ -24,8 +24,8 @@
 | M0 规格与基线 | 进行中 | SPEC、追踪矩阵、在线 M0-M7 milestone/Epic 和质量基线已建立 | 真实 x64 与干净用户跨平台 E2E 完成 |
 | M1 状态、错误和工作流契约 | 待验证 | PR #15 已合并；全部 Tauri command 使用 V1 envelope，状态、阶段事件、跨平台错误 fixture 和脱敏已接入 | Windows UI 错误交互复核，补齐取消与跨重启恢复边界 |
 | M2 官方应用安装可靠性 | 未开始 | Windows 使用 Store/winget，结果会二次检测 | 可信来源、架构、安装结果和恢复路径可审计 |
-| M3 Router 真实响应验证 | 进行中 | `/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
-| M4 配置事务与跨平台密钥 | 未开始 | 有快照和 Windows DPAPI，缺事务清单与 macOS Keychain | 写入可恢复、验证失败自动回滚、两平台密钥安全 |
+| M3 Router 真实响应验证 | 待验证 | PR #16 已合并；`/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
+| M4 配置事务与跨平台密钥 | 进行中 | PR #17 实现事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复；Windows ARM64 E2E 通过 | 文件系统故障矩阵、真实断电恢复、有效来源检测和 macOS Keychain |
 | M5 小白用户交互 | 未开始 | 首页和向导可用，但仍依赖部分前端推断 | 唯一主动作、真实状态、失败可恢复、可访问性通过 |
 | M6 诊断与生命周期 | 未开始 | 有基础诊断和手动恢复 | 脱敏诊断包、定向修复、升级/卸载 E2E |
 | M7 签名与企业交付 | 未开始 | CI 可构建三平台，Release 有 SHA256，尚未签名 | Windows 签名、macOS 公证、企业网络与发布门禁 |
@@ -46,6 +46,7 @@
 | WP-302 模型发现 | 已验证 | 限制响应大小和模型数量；去重、空 ID、提交二次核对及 Windows ARM64 UI E2E | 保持跨平台回归 |
 | WP-303 Responses Probe | 待验证 | 固定 `Return OK.`、16 token、SSE/JSON、完成事件、模型一致性、正文不留存；Windows ARM64 正常/404/断流 E2E | 真实 Ollama/LM Studio 兼容服务 |
 | WP-304 Router 错误 UX | 待验证 | 404 和流中断停在稳定步骤 ID；配置不变、旧证据撤销、状态退回 `models_verified` | 真实服务、代理和私有 CA 错误动作验收 |
+| WP-402 配置事务 v2 | 待验证 | PR #17；事务 manifest/SHA256、同目录原子替换、启动恢复、自动回滚、可逆恢复；Windows ARM64 正常/故障/重试/恢复 E2E | 权限/磁盘满/替换失败、真实进程中断、macOS 平台 E2E |
 
 ## 证据规则
 
@@ -139,6 +140,30 @@
 - 同一提交的 Windows x64 候选 SHA256 为
   `69c9ab9b885f6cff181c2e5d00dfdb717771802a23c5f01dc720062452324346`；
   x64 目标测试和 ARM64 兼容层安装冒烟通过，不替代真实 x64 机器门禁。
+- PR [#16](https://github.com/theivanxu/codex-assistant/pull/16) 全量 CI 通过后 squash
+  合并为 `main@e048346`；M3 Epic 保持开放追踪真实服务和企业网络门禁。
+- 从 `main@e048346` 创建 `feat/m4-config-transaction`，建立 M4 PR
+  [#17](https://github.com/theivanxu/codex-assistant/pull/17)。
+- 新增配置事务 v2：每次 setup/restore 在修改任何受管文件前生成
+  `runtime/snapshots/<transactionId>/manifest.json`，记录时间、版本、四个目标文件、
+  原始存在状态、备份文件和 SHA256。
+- `config.toml`、运行状态、模型目录和加密 Key 改为同目录临时文件、完整解析校验、
+  `fsync` 和原子替换；Windows 使用 `MoveFileExW` 的 replace/write-through 语义。
+- 最终磁盘与 Router 复核失败会追加 `rollback` 阶段并自动恢复。回滚失败保留活动
+  journal、manifest 和 `ROLLBACK_FAILED`；下次状态/配置检查会恢复未完成事务。
+- Rust/macOS 宿主和 Windows ARM64/x64 目标测试均为 45 通过、0 失败、1 个本地
+  Ollama live test 忽略；Windows PowerShell 构建/E2E 脚本语法检查通过。
+- 应用源提交 `595dbdc` 的 Windows ARM64 候选 SHA256 为
+  `15160a53519c6c169a556b01308ef98dc6ad5a9e5299b4296248626c7849f88f`；
+  x64 候选 SHA256 为
+  `8ff8178ed8161ac373342e2192a53d283e522a408a7463991aa0edf3a15ea160`。
+- ARM64 原生和 x64 兼容层安装冒烟均通过；最终 VM 恢复原生 ARM64。真实 x64
+  机器仍是发布门禁。
+- ARM64 正常 UI E2E 写入并提交事务，运行状态与 `SystemStatusV1` 暴露同一事务 ID。
+  故障模式在 Responses 成功后让最终 `/models` 返回 503，稳定停在 `verify`；
+  四个受管文件哈希全部恢复，状态为 `rolled_back`，活动 journal 已删除。
+- 恢复正常 Router 后同一用户无需清理直接重试成功；手动恢复 round-trip 通过并生成
+  独立 `operation=restore` 的已提交事务。配置与恢复期间均未自动启动 ChatGPT。
 
 ## GitHub 追踪
 

@@ -5,6 +5,7 @@ param(
   [switch]$LaunchAfterSetup,
   [switch]$TestRestore,
   [switch]$ExpectSetupFailure,
+  [switch]$ExpectRollback,
   [ValidateSet("none", "focus", "custom", "official")]
   [string]$ApplyAppearance = "none",
   [string]$ThemeImagePath = ""
@@ -12,6 +13,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+if ($ExpectSetupFailure -and $ExpectRollback) {
+  throw "-ExpectSetupFailure and -ExpectRollback cannot be used together"
+}
 
 function Wait-Until([scriptblock]$Condition, [int]$TimeoutSeconds, [string]$FailureMessage) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -31,6 +35,67 @@ function Get-ChatGptProcessCount {
     } catch {}
   }
   return $count
+}
+
+function Get-FileFingerprint([string]$Path) {
+  if (!(Test-Path $Path)) {
+    return [ordered]@{ exists = $false; sha256 = "" }
+  }
+  return [ordered]@{
+    exists = $true
+    sha256 = (Get-FileHash $Path -Algorithm SHA256).Hash
+  }
+}
+
+function Assert-FileFingerprint([string]$Path, $Before, [string]$Label) {
+  $after = Get-FileFingerprint $Path
+  if ($after.exists -ne $Before.exists -or $after.sha256 -ne $Before.sha256) {
+    throw "$Label changed during a transaction that should have rolled back"
+  }
+}
+
+function Assert-TransactionManifest($Summary, [string]$ExpectedStatus, [string]$ExpectedOperation) {
+  if (!$Summary.manifestPath -or !(Test-Path $Summary.manifestPath)) {
+    throw "Transaction manifest was not preserved"
+  }
+  $manifest = Get-Content $Summary.manifestPath -Raw | ConvertFrom-Json
+  if ($manifest.schemaVersion -ne 2 -or
+      $manifest.transactionId -ne $Summary.transactionId -or
+      $manifest.status -ne $ExpectedStatus -or
+      $manifest.operation -ne $ExpectedOperation -or
+      !$manifest.createdAt -or
+      !$manifest.createdOrder -or
+      !$manifest.appVersion) {
+    throw "Transaction manifest metadata is incomplete or inconsistent"
+  }
+  $expectedIds = @("codex-config", "model-catalog", "router-secret", "runtime-state")
+  $actualIds = @($manifest.files | ForEach-Object { $_.id } | Sort-Object)
+  if ($actualIds.Count -ne $expectedIds.Count -or
+      (Compare-Object $expectedIds $actualIds)) {
+    throw "Transaction manifest does not cover all managed configuration files"
+  }
+  $snapshotRoot = Split-Path $Summary.manifestPath -Parent
+  foreach ($file in $manifest.files) {
+    if (!$file.targetPath) {
+      throw "Transaction manifest contains an empty target path"
+    }
+    if ($file.existed) {
+      if (!$file.backupFile -or !$file.sha256) {
+        throw "Transaction manifest is missing backup evidence for $($file.id)"
+      }
+      $backupPath = Join-Path $snapshotRoot $file.backupFile
+      if (!(Test-Path $backupPath)) {
+        throw "Transaction backup is missing for $($file.id)"
+      }
+      $actualHash = (Get-FileHash $backupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+      if ($actualHash -ne $file.sha256.ToLowerInvariant()) {
+        throw "Transaction backup SHA256 mismatch for $($file.id)"
+      }
+    } elseif ($file.backupFile -or $file.sha256) {
+      throw "Transaction manifest recorded backup evidence for a file that did not exist"
+    }
+  }
+  return $manifest
 }
 
 function Invoke-CdpExpression([System.Net.WebSockets.ClientWebSocket]$Socket, [string]$Expression, [int]$Id) {
@@ -77,6 +142,10 @@ $assistantExe = Get-ChildItem $env:LOCALAPPDATA -Filter "codex-assistant.exe" -R
 if (!$assistantExe) { throw "Installed codex-assistant.exe was not found" }
 $configPath = Join-Path $env:USERPROFILE ".codex\config.toml"
 $runtimeConfigPath = Join-Path $env:LOCALAPPDATA "CodexAssistant\runtime\config.json"
+$modelCatalogPath = Join-Path $env:LOCALAPPDATA "CodexAssistant\runtime\models.json"
+$routerSecretPath = Join-Path $env:LOCALAPPDATA "CodexAssistant\runtime\router-key.secret"
+$lastTransactionPath = Join-Path $env:LOCALAPPDATA "CodexAssistant\runtime\transaction.last.json"
+$activeTransactionPath = Join-Path $env:LOCALAPPDATA "CodexAssistant\runtime\transaction.active.json"
 $hadConfigBefore = Test-Path $configPath
 $stateBeforeRestore = if ($TestRestore -and (Test-Path $runtimeConfigPath)) {
   Get-Content $runtimeConfigPath -Raw | ConvertFrom-Json
@@ -211,11 +280,17 @@ $runtimeBeforeSetup = if (Test-Path $runtimeConfigPath) {
 } else {
   $null
 }
-if ($ExpectSetupFailure -and
+if (($ExpectSetupFailure -or $ExpectRollback) -and
     (!$configExistedBeforeSetup -or
      !$runtimeBeforeSetup -or
      !$runtimeBeforeSetup.responsesVerifiedAt)) {
   throw "Expected-failure setup requires an existing Responses-verified configuration"
+}
+$managedBeforeSetup = [ordered]@{
+  config = Get-FileFingerprint $configPath
+  runtime = Get-FileFingerprint $runtimeConfigPath
+  models = Get-FileFingerprint $modelCatalogPath
+  secret = Get-FileFingerprint $routerSecretPath
 }
 
 $chatGptBefore = Get-ChatGptProcessCount
@@ -243,6 +318,60 @@ $chatGptAfter = Get-ChatGptProcessCount
 if (!$result.visible) { throw "Configuration result did not become visible" }
 if ($chatGptBefore -ne 0 -or $chatGptAfter -ne 0) {
   throw "ChatGPT was running during configuration (before=$chatGptBefore, after=$chatGptAfter)"
+}
+
+if ($ExpectRollback) {
+  if ($result.success) { throw "Configuration unexpectedly succeeded" }
+  if ($result.failedTaskId -ne "verify") {
+    throw "Configuration failed at an unexpected step: $($result.failedTaskId)"
+  }
+  Assert-FileFingerprint $configPath $managedBeforeSetup.config "Codex config"
+  Assert-FileFingerprint $runtimeConfigPath $managedBeforeSetup.runtime "Assistant runtime state"
+  Assert-FileFingerprint $modelCatalogPath $managedBeforeSetup.models "Model catalog"
+  Assert-FileFingerprint $routerSecretPath $managedBeforeSetup.secret "Router secret"
+  if (!(Test-Path $lastTransactionPath)) {
+    throw "Rolled-back transaction summary was not written"
+  }
+  $lastTransaction = Get-Content $lastTransactionPath -Raw | ConvertFrom-Json
+  if ($lastTransaction.status -ne "rolled_back" -or !$lastTransaction.transactionId) {
+    throw "Last transaction does not record a successful rollback"
+  }
+  $rollbackManifest = Assert-TransactionManifest $lastTransaction "rolled_back" "configure"
+  if (Test-Path $activeTransactionPath) {
+    throw "Active transaction journal remained after a successful rollback"
+  }
+  $statusAfterRollback = Invoke-CdpExpression $socket @'
+(async () => {
+  const status = await window.__TAURI__.core.invoke('get_system_status');
+  return {
+    overall: status.overall,
+    configState: status.config?.state,
+    lastTransactionId: status.config?.lastTransactionId,
+    configPresent: status.configPresent,
+    ready: status.ready
+  };
+})()
+'@ 18
+  if ($statusAfterRollback.configState -ne "verified" -or
+      !$statusAfterRollback.configPresent -or
+      $statusAfterRollback.lastTransactionId -ne $lastTransaction.transactionId) {
+    throw "SystemStatusV1 does not expose the rolled-back transaction: $($statusAfterRollback | ConvertTo-Json -Compress)"
+  }
+  $socket.Dispose()
+  [pscustomobject]@{
+    success = $true
+    expectedRollback = $true
+    router = $RouterUrl
+    selectedModel = $connection.selectedModel
+    failedTaskId = $result.failedTaskId
+    filesRestored = $true
+    transactionId = $lastTransaction.transactionId
+    transactionStatus = $lastTransaction.status
+    activeJournalRemoved = $true
+    systemStatus = $statusAfterRollback
+    chatGptProcessCountDuringSetup = $chatGptAfter
+  } | ConvertTo-Json -Depth 5 -Compress
+  return
 }
 
 if ($ExpectSetupFailure) {
@@ -326,6 +455,21 @@ $runtimeState = Get-Content $runtimeConfigPath -Raw | ConvertFrom-Json
 if (!$runtimeState.responsesVerifiedAt -or $runtimeState.responsesProtocol -notin @("sse", "json")) {
   throw "Runtime state does not contain valid Responses verification evidence"
 }
+if (!$runtimeState.transactionId) {
+  throw "Runtime state does not contain the committed transaction ID"
+}
+if (!(Test-Path $lastTransactionPath)) {
+  throw "Committed transaction summary was not written"
+}
+$committedTransaction = Get-Content $lastTransactionPath -Raw | ConvertFrom-Json
+if ($committedTransaction.status -ne "committed" -or
+    $committedTransaction.transactionId -ne $runtimeState.transactionId) {
+  throw "Committed transaction summary does not match runtime state"
+}
+$committedManifest = Assert-TransactionManifest $committedTransaction "committed" "configure"
+if (Test-Path $activeTransactionPath) {
+  throw "Active transaction journal remained after a successful setup"
+}
 $statusAfterSetup = Invoke-CdpExpression $socket @'
 (async () => {
   const status = await window.__TAURI__.core.invoke('get_system_status');
@@ -333,6 +477,8 @@ $statusAfterSetup = Invoke-CdpExpression $socket @'
     overall: status.overall,
     routerState: status.router?.state,
     lastVerifiedAt: status.router?.lastVerifiedAt,
+    configState: status.config?.state,
+    lastTransactionId: status.config?.lastTransactionId,
     ready: status.ready
   };
 })()
@@ -340,6 +486,8 @@ $statusAfterSetup = Invoke-CdpExpression $socket @'
 if ($statusAfterSetup.overall -ne "ready" -or
     $statusAfterSetup.routerState -ne "responses_verified" -or
     !$statusAfterSetup.lastVerifiedAt -or
+    $statusAfterSetup.configState -ne "verified" -or
+    $statusAfterSetup.lastTransactionId -ne $runtimeState.transactionId -or
     !$statusAfterSetup.ready) {
   throw "SystemStatusV1 did not become Responses-verified after setup: $($statusAfterSetup | ConvertTo-Json -Compress)"
 }
@@ -401,6 +549,14 @@ if ($TestRestore) {
     $restoredToken = $null
   }
   $tokenBeforeRestore = $null
+  $restoreTransaction = Get-Content $lastTransactionPath -Raw | ConvertFrom-Json
+  if ($restoreTransaction.status -ne "committed" -or $restoreTransaction.operation -ne "restore") {
+    throw "Restore did not commit its own reversible transaction"
+  }
+  $restoreManifest = Assert-TransactionManifest $restoreTransaction "committed" "restore"
+  if (Test-Path $activeTransactionPath) {
+    throw "Active transaction journal remained after restore"
+  }
   $restoreRoundTrip = $true
 }
 
@@ -558,6 +714,8 @@ $socket.Dispose()
   models = $connection.models
   selectedModel = $connection.selectedModel
   statusConsistency = [bool]$connection.statusConsistency
+  transactionId = $runtimeState.transactionId
+  transactionStatus = $committedTransaction.status
   keyConfigured = $keyConfigured
   resultTitle = $result.title
   localOllamaDiagnostic = $connection.localOllamaDiagnostic

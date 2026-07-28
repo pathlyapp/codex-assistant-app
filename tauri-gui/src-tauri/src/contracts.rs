@@ -27,6 +27,8 @@ pub struct SystemStatusInput {
     pub configured_model: Option<String>,
     pub key_configured: bool,
     pub backup_available: bool,
+    pub last_transaction_id: Option<String>,
+    pub transaction_recovery_failed: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -106,11 +108,14 @@ pub struct LegacySystemStatusV1 {
 
 impl SystemStatusV1 {
     pub fn from_input(input: SystemStatusInput) -> Self {
-        let ready = input.app_installed
+        let ready = !input.transaction_recovery_failed
+            && input.app_installed
             && input.config_present
             && input.router_reachable
             && input.router_responses_verified;
-        let overall = if ready {
+        let overall = if input.transaction_recovery_failed {
+            "blocked"
+        } else if ready {
             "ready"
         } else if input.app_installed && input.config_present && !input.router_reachable {
             "blocked"
@@ -132,7 +137,9 @@ impl SystemStatusV1 {
         } else {
             "not_configured"
         };
-        let config_state = if input.config_present {
+        let config_state = if input.transaction_recovery_failed {
+            "rollback_failed"
+        } else if input.config_present {
             "verified"
         } else {
             "missing"
@@ -172,7 +179,7 @@ impl SystemStatusV1 {
                 path: input.config_path.clone(),
                 effective_source: if input.config_present { "user" } else { "none" }.to_string(),
                 backup_available: input.backup_available,
-                last_transaction_id: None,
+                last_transaction_id: input.last_transaction_id.clone(),
             },
             recommended_action,
             legacy: LegacySystemStatusV1 {
@@ -195,7 +202,9 @@ impl SystemStatusV1 {
 }
 
 fn recommended_action(input: &SystemStatusInput, ready: bool) -> RecommendedActionV1 {
-    let (id, label) = if ready {
+    let (id, label) = if input.transaction_recovery_failed {
+        ("open_diagnostics", "查看恢复详情")
+    } else if ready {
         ("open_chatgpt", "打开 ChatGPT")
     } else if !input.app_installed && input.platform == "Windows" {
         ("install_chatgpt", "安装并配置")
@@ -677,6 +686,7 @@ pub enum SetupStageV1 {
     ValidateRouterResponse,
     ConfigureCodex,
     Verify,
+    Rollback,
 }
 
 impl SetupStageV1 {
@@ -688,6 +698,7 @@ impl SetupStageV1 {
             Self::ValidateRouterResponse => "validate_router_response",
             Self::ConfigureCodex => "configure_codex",
             Self::Verify => "verify",
+            Self::Rollback => "rollback",
         }
     }
 }
@@ -822,6 +833,8 @@ mod tests {
             configured_model: config_present.then(|| "model".to_string()),
             key_configured: config_present,
             backup_available: false,
+            last_transaction_id: None,
+            transaction_recovery_failed: false,
         }
     }
 
@@ -855,6 +868,19 @@ mod tests {
         assert_eq!(models_only_status.overall, "action_required");
         assert_eq!(models_only_status.router.state, "models_verified");
         assert_eq!(models_only_status.recommended_action.id, "retry_router");
+
+        let mut rollback_failed = status_input(true, true, true);
+        rollback_failed.transaction_recovery_failed = true;
+        rollback_failed.last_transaction_id = Some("tx-failed".to_string());
+        let rollback_status = SystemStatusV1::from_input(rollback_failed);
+        assert_eq!(rollback_status.overall, "blocked");
+        assert_eq!(rollback_status.config.state, "rollback_failed");
+        assert_eq!(
+            rollback_status.config.last_transaction_id.as_deref(),
+            Some("tx-failed")
+        );
+        assert_eq!(rollback_status.recommended_action.id, "open_diagnostics");
+        assert!(!rollback_status.legacy.ready);
     }
 
     #[test]
