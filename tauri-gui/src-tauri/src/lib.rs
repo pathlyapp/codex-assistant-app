@@ -108,6 +108,13 @@ struct RestoreResult {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct DisconnectResult {
+    changed: bool,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ResetStepResult {
     id: String,
     label: String,
@@ -569,6 +576,14 @@ async fn restore_codex_config() -> Result<RestoreResult, ErrorEnvelopeV1> {
         .await
         .map_err(|error| command_error("rollback", format!("恢复任务失败: {error}")))?
         .map_err(|error| command_error("rollback", error))
+}
+
+#[tauri::command]
+async fn disconnect_router() -> Result<DisconnectResult, ErrorEnvelopeV1> {
+    tauri::async_runtime::spawn_blocking(disconnect_router_inner)
+        .await
+        .map_err(|error| command_error("disconnect_router", format!("断开任务失败: {error}")))?
+        .map_err(|error| command_error("disconnect_router", error))
 }
 
 #[tauri::command]
@@ -1439,6 +1454,65 @@ fn restore_legacy_configuration_snapshot(
 
 fn restore_codex_config_inner() -> Result<RestoreResult, String> {
     restore_configuration_snapshot(&resolve_paths()?)
+}
+
+fn disconnect_router_inner() -> Result<DisconnectResult, String> {
+    disconnect_router_at(&resolve_paths()?)
+}
+
+fn disconnect_router_at(paths: &InstallerPaths) -> Result<DisconnectResult, String> {
+    let managed_files = managed_configuration_files(paths);
+    config_transaction::recover_interrupted(
+        &paths.install_root,
+        &managed_files,
+        &rfc3339_timestamp()?,
+    )?;
+    if !config_mentions_assistant(&paths.codex_config_path) {
+        return Ok(DisconnectResult {
+            changed: false,
+            message: "当前已是官方配置，无需断开".to_string(),
+        });
+    }
+
+    let mut transaction = ConfigTransaction::begin(
+        &paths.install_root,
+        &new_operation_id(),
+        "disconnect_router",
+        &rfc3339_timestamp()?,
+        VERSION,
+        &managed_files,
+    )?;
+    transaction.mark_writing()?;
+    let cleaned = clean_codex_config(&paths.codex_config_path).and_then(|_| {
+        if config_mentions_assistant(&paths.codex_config_path) {
+            Err("移除后仍检测到助手配置".to_string())
+        } else {
+            Ok(())
+        }
+    });
+    match cleaned {
+        Ok(()) => {
+            if let Err(commit_error) = transaction.commit(&rfc3339_timestamp()?) {
+                return match transaction
+                    .rollback(&rfc3339_timestamp()?, &redact_error(&commit_error))
+                {
+                    Ok(()) => Err(format!("提交断开事务失败，已撤销本次操作: {commit_error}")),
+                    Err(rollback_error) => Err(rollback_error),
+                };
+            }
+            Ok(DisconnectResult {
+                changed: true,
+                message: "已从 Codex 配置移除本地 Router，恢复官方默认；重新打开 ChatGPT 后生效"
+                    .to_string(),
+            })
+        }
+        Err(error) => {
+            match transaction.rollback(&rfc3339_timestamp()?, &redact_error(&error)) {
+                Ok(()) => Err(format!("断开 Router 失败，已撤销本次操作: {error}")),
+                Err(rollback_error) => Err(rollback_error),
+            }
+        }
+    }
 }
 
 fn reset_step(id: &str, label: &str, status: &str, message: impl Into<String>) -> ResetStepResult {
@@ -3710,6 +3784,7 @@ pub fn run() {
             launch_chatgpt,
             restart_chatgpt,
             restore_codex_config,
+            disconnect_router,
             factory_reset,
             get_appearance_status,
             apply_appearance,
@@ -4137,6 +4212,48 @@ model = "gpt-5"
         let missing = clean_codex_config(&config).expect("clean missing config");
         assert!(!missing);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disconnect_router_removes_managed_config_and_stays_restorable() {
+        let root = env::temp_dir().join(format!(
+            "codex-assistant-disconnect-test-{}-{}",
+            std::process::id(),
+            unix_timestamp()
+        ));
+        let paths = InstallerPaths {
+            install_root: root.join("runtime"),
+            codex_config_path: root.join(".codex").join("config.toml"),
+        };
+        fs::create_dir_all(&paths.install_root).expect("create runtime directory");
+        fs::create_dir_all(paths.codex_config_path.parent().expect("config parent"))
+            .expect("create config directory");
+        fs::write(
+            &paths.codex_config_path,
+            format!(
+                "model = \"llama3.1\"\nmodel_provider = \"{PROVIDER_ID}\"\n\n[model_providers.{PROVIDER_ID}]\nbase_url = \"http://127.0.0.1:11434/v1\"\nwire_api = \"responses\"\n\n[profiles.keep]\nmodel = \"gpt-5\"\n"
+            ),
+        )
+        .expect("write managed config");
+        fs::write(paths.install_root.join("config.json"), "state\n").expect("write state");
+
+        let result = disconnect_router_at(&paths).expect("disconnect");
+        assert!(result.changed);
+        assert!(!config_mentions_assistant(&paths.codex_config_path));
+        let after = fs::read_to_string(&paths.codex_config_path).expect("read cleaned config");
+        assert!(after.contains("[profiles.keep]"));
+        assert!(!config_transaction::active_transaction_failed(&paths.install_root));
+
+        let restored = restore_configuration_snapshot(&paths).expect("restore after disconnect");
+        assert!(restored.message.contains("已恢复"));
+        assert!(config_mentions_assistant(&paths.codex_config_path));
+
+        let again = disconnect_router_at(&paths).expect("second disconnect");
+        assert!(again.changed);
+
+        let noop = disconnect_router_at(&paths).expect("disconnect with official config");
+        assert!(!noop.changed);
+        fs::remove_dir_all(root).expect("cleanup test directory");
     }
 
     #[test]

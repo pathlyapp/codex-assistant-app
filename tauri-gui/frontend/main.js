@@ -28,6 +28,7 @@ const ICONS = {
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/></svg>',
   shieldCheck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/><path d="m9 12 2 2 4-4"/></svg>',
   terminal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>',
+  unplug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>',
 };
 
@@ -119,6 +120,7 @@ function bindUi() {
   $("#editConfigButton").addEventListener("click", () => navigate("setup"));
   $("#restoreConfigButton").addEventListener("click", restoreConfiguration);
   $("#diagnosticRestoreButton").addEventListener("click", restoreConfiguration);
+  $("#disconnectRouterButton").addEventListener("click", disconnectRouter);
   $("#routerForm").addEventListener("submit", applyConfiguration);
   $("#testRouterButton").addEventListener("click", () => testRouter({ announce: true }));
   $("#noAuthInput").addEventListener("change", updateAuthFields);
@@ -265,6 +267,7 @@ function renderSystemStatus(status) {
   $("#currentModel").textContent = status.configuredModel || "未配置";
   $("#currentKeyState").textContent = status.keyConfigured ? "已安全保存" : status.configPresent ? "无需 Key" : "未配置";
   $("#restoreConfigButton").classList.toggle("hidden", !status.backupAvailable);
+  $("#disconnectRouterButton").classList.toggle("hidden", !status.configPresent);
   $("#diagnosticRestoreButton").disabled = !status.backupAvailable;
   $("#diagPlatform").textContent = `${status.platform} · ${formatArchitecture(status.architecture)}`;
   $("#diagApp").textContent = `${status.appInstalled ? "正常" : appNeedsRepair ? "需要修复" : "未安装"} · ${status.appDetail}`;
@@ -929,6 +932,37 @@ async function restoreConfiguration() {
     buttons.forEach((button) => {
       button.disabled = false;
     });
+  }
+}
+
+async function disconnectRouter() {
+  if (!tauri?.core || !state.status?.configPresent || state.running || state.resetting) return;
+  const confirmed = await requestConfirmation({
+    title: "断开本地 Router？",
+    message: "将从 Codex 配置中移除助手写入的 Router 内容并重启 ChatGPT，恢复官方默认行为。已保存的 Router 地址、Key 和配置备份都会保留，可随时重新应用或恢复。",
+    confirmLabel: "断开并重启",
+  });
+  if (!confirmed) return;
+  const button = $("#disconnectRouterButton");
+  button.disabled = true;
+  try {
+    const result = await tauri.core.invoke("disconnect_router");
+    if (result.changed) {
+      try {
+        await tauri.core.invoke("restart_chatgpt");
+        showToast("已断开 Router，ChatGPT 已使用官方配置重新打开");
+      } catch (restartError) {
+        showToast(`${result.message}；${friendlyError(restartError)}`, true);
+      }
+    } else {
+      showToast(result.message);
+    }
+    state.formDirty = false;
+    await refreshStatus({ hydrateForm: true });
+  } catch (error) {
+    showToast(friendlyError(error), true);
+  } finally {
+    button.disabled = false;
   }
 }
 
