@@ -49,6 +49,54 @@ MSVC/Windows SDK。不要在 macOS 与 Windows 之间共用同一个 Cargo `targ
 - E2E 额外断言首页状态徽标、配置页 Gateway 和诊断摘要与同一次
   `SystemStatusV1` 一致。
 
+同日 `c120943` 的 M3 Responses 探针候选证据：
+
+- Windows ARM64/x64 目标测试均为 40 passed、0 failed、1 ignored。
+- ARM64 SHA256：
+  `12ac72e27e1a12920a1173dd80cac1a860fc402648233d424aeb32e5770f2a1b`。
+- x64 SHA256：
+  `69c9ab9b885f6cff181c2e5d00dfdb717771802a23c5f01dc720062452324346`。
+- ARM64 原生安装通过静默不自启、首次响应和重复启动单实例。
+- x64 在 ARM64 Windows 兼容层完成相同安装冒烟；真实 x64 机器仍是发布门禁。
+- 正常 UI E2E 写入 RFC3339 `responsesVerifiedAt` 和 `responsesProtocol=sse`，
+  `SystemStatusV1` 为 `responses_verified/ready`，配置期间 ChatGPT 进程数为 0。
+- `responses-404` 和 `disconnect` 均停在 `validate_router_response`；既有
+  `config.toml` 哈希不变，旧验证证据撤销，状态退回
+  `action_required/models_verified/ready=false`。
+- 故障服务恢复为正常模式后，同一用户直接重试成功并重新进入 `ready`。
+
+M3 起不再使用只实现 `/models` 的临时服务。macOS 宿主机可在 Parallels 专用网卡
+地址上启动仓库内受控 Router：
+
+```bash
+python3 tools/router-test-server.py \
+  --host 10.211.55.2 \
+  --port 11435 \
+  --model codex-assistant-test \
+  --mode normal
+```
+
+Windows UI E2E 继续使用 `http://10.211.55.2:11435/v1`，并必须断言：
+
+- 失败与成功步骤使用 DOM 中稳定的 `data-task-id`，不得依赖中文显示文本或日志字面量。
+- 运行状态包含 `responsesVerifiedAt` 和 `responsesProtocol`。
+- `SystemStatusV1.router.state == responses_verified` 且整体为 `ready`。
+- 将测试服务切换到 `responses-404` 或 `disconnect` 后，setup 在写配置前失败；
+  `config.toml` 哈希保持不变，旧验证证据撤销且整体不再 `ready`。
+- 测试服务不记录探针输出、Access Key 或请求正文。
+
+失败路径自动验收：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows-e2e.ps1 `
+  -RouterUrl http://10.211.55.2:11435/v1 `
+  -ExpectSetupFailure
+```
+
+该模式要求测试前已有相同 Router/模型的可信 Responses 证据，用于证明重新验证失败会
+撤销旧证据但不会改写现有 Codex 配置。每个失败场景后必须恢复正常 Router 并运行一次
+无 `-ExpectSetupFailure` 的 E2E，证明用户可直接重试恢复。
+
 标准产物：
 
 ```text
@@ -135,7 +183,7 @@ python3 tauri-gui/tools/parallels-ollama-proxy.py uninstall
 3. 保持“无需 Key”。
 4. 点击“测试并读取模型”，必须显示真实模型列表；此前模型选择和应用按钮必须禁用。
 5. 选择模型并点击“应用并验证”。
-6. 观察五个阶段依次完成。
+6. 观察六个阶段依次完成，其中“读取 Router 模型”和“验证实际请求”必须分开显示。
 7. 完成前 ChatGPT 不得启动。
 8. 完成页点击“重启并打开 ChatGPT”，确认弹窗后才允许关闭并重新启动应用。
 

@@ -54,7 +54,22 @@ The Router must implement the OpenAI Responses-compatible protocol used by Codex
 wire_api = "responses"
 ```
 
-The installer currently validates `/models`; Windows end-to-end acceptance must additionally run a real Codex request against `/responses`.
+Before writing configuration, the assistant sends a fixed low-cost streaming probe with no customer data:
+
+```json
+{
+  "model": "<selected model>",
+  "input": "Return OK.",
+  "stream": true,
+  "max_output_tokens": 16
+}
+```
+
+The probe accepts a valid `response.completed` SSE event or a compatible completed JSON response. The returned model must match the selected model. Output text is inspected only as part of the in-memory response structure and is never retained in state, logs, or error details.
+
+`/models` success alone is not readiness. A failed, disconnected, malformed, or model-mismatched Responses probe stops setup before configuration is written.
+
+If the same Router URL and model were verified previously, a failed revalidation revokes only the assistant's cached Responses verification evidence. The existing Codex configuration and stored authentication material remain unchanged, while system status falls back to `models_verified` and is no longer `ready`.
 
 ## Operational requirements
 

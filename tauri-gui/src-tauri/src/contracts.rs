@@ -21,6 +21,8 @@ pub struct SystemStatusInput {
     pub config_path: String,
     pub router_reachable: bool,
     pub router_detail: String,
+    pub router_responses_verified: bool,
+    pub router_last_verified_at: Option<String>,
     pub configured_gateway: Option<String>,
     pub configured_model: Option<String>,
     pub key_configured: bool,
@@ -104,7 +106,10 @@ pub struct LegacySystemStatusV1 {
 
 impl SystemStatusV1 {
     pub fn from_input(input: SystemStatusInput) -> Self {
-        let ready = input.app_installed && input.config_present && input.router_reachable;
+        let ready = input.app_installed
+            && input.config_present
+            && input.router_reachable
+            && input.router_responses_verified;
         let overall = if ready {
             "ready"
         } else if input.app_installed && input.config_present && !input.router_reachable {
@@ -118,7 +123,9 @@ impl SystemStatusV1 {
         } else {
             "missing"
         };
-        let router_state = if input.router_reachable {
+        let router_state = if input.router_reachable && input.router_responses_verified {
+            "responses_verified"
+        } else if input.router_reachable {
             "models_verified"
         } else if input.configured_gateway.is_some() {
             "unreachable"
@@ -157,7 +164,7 @@ impl SystemStatusV1 {
                 gateway: input.configured_gateway.clone(),
                 model: input.configured_model.clone(),
                 key_configured: input.key_configured,
-                last_verified_at: None,
+                last_verified_at: input.router_last_verified_at.clone(),
             },
             config: ConfigStatusV1 {
                 state: config_state.to_string(),
@@ -667,6 +674,7 @@ pub enum SetupStageV1 {
     Preflight,
     InstallChatgpt,
     ValidateRouter,
+    ValidateRouterResponse,
     ConfigureCodex,
     Verify,
 }
@@ -677,6 +685,7 @@ impl SetupStageV1 {
             Self::Preflight => "preflight",
             Self::InstallChatgpt => "install_chatgpt",
             Self::ValidateRouter => "validate_router",
+            Self::ValidateRouterResponse => "validate_router_response",
             Self::ConfigureCodex => "configure_codex",
             Self::Verify => "verify",
         }
@@ -807,6 +816,8 @@ mod tests {
             config_path: "C:/Users/test/.codex/config.toml".to_string(),
             router_reachable,
             router_detail: "test".to_string(),
+            router_responses_verified: router_reachable,
+            router_last_verified_at: router_reachable.then(|| "2026-07-28T00:00:00Z".to_string()),
             configured_gateway: config_present.then(|| "http://router/v1".to_string()),
             configured_model: config_present.then(|| "model".to_string()),
             key_configured: config_present,
@@ -836,6 +847,14 @@ mod tests {
         mac_missing.platform = "macOS".to_string();
         let mac_status = SystemStatusV1::from_input(mac_missing);
         assert_eq!(mac_status.recommended_action.id, "open_install_guide");
+
+        let mut models_only = status_input(true, true, true);
+        models_only.router_responses_verified = false;
+        models_only.router_last_verified_at = None;
+        let models_only_status = SystemStatusV1::from_input(models_only);
+        assert_eq!(models_only_status.overall, "action_required");
+        assert_eq!(models_only_status.router.state, "models_verified");
+        assert_eq!(models_only_status.recommended_action.id, "retry_router");
     }
 
     #[test]
@@ -846,7 +865,8 @@ mod tests {
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["overall"], "ready");
         assert_eq!(value["app"]["state"], "installed");
-        assert_eq!(value["router"]["state"], "models_verified");
+        assert_eq!(value["router"]["state"], "responses_verified");
+        assert_eq!(value["router"]["lastVerifiedAt"], "2026-07-28T00:00:00Z");
         assert_eq!(value["config"]["state"], "verified");
         assert_eq!(value["ready"], true);
         assert_eq!(value["appInstalled"], true);
@@ -1046,7 +1066,7 @@ mod tests {
             "验证 Router",
             "正在验证",
             3,
-            5,
+            6,
             false,
             json!({}),
         );

@@ -19,12 +19,14 @@ use url::Url;
 use std::io::{Cursor, Read};
 
 mod contracts;
+mod router_client;
 mod token_support;
 
 use contracts::{
     new_operation_id, ErrorEnvelopeV1, SetupStageV1, StageEventV1, StageStatusV1,
     SystemStatusInput, SystemStatusV1, SCHEMA_VERSION_V1,
 };
+use router_client::{ResponsesProbeResult, RouterClient};
 
 const VERSION: &str = "0.8.8";
 const CONFIG_START: &str = "# >>> CodexAssistant Managed Config";
@@ -394,6 +396,10 @@ struct InstallState {
     secret_storage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_catalog_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    responses_verified_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    responses_protocol: Option<String>,
     installed_at: String,
 }
 
@@ -444,6 +450,7 @@ struct TokenHelperCommand {
 struct InstallContext {
     options: SetupOptions,
     models: Vec<String>,
+    responses_probe: Option<ResponsesProbeResult>,
 }
 
 #[derive(Clone, Debug)]
@@ -629,11 +636,27 @@ fn collect_system_status() -> Result<SystemStatusV1, String> {
         Some(saved) => match gateway_bearer_from_state(saved)
             .and_then(|bearer| fetch_models(&saved.gateway_base_url, bearer.as_deref()))
         {
-            Ok(models) => (true, format!("服务可用，发现 {} 个模型", models.len())),
+            Ok(models) if saved.responses_verified_at.is_some() => (
+                true,
+                format!("Responses 已验证，当前发现 {} 个模型", models.len()),
+            ),
+            Ok(models) => (
+                true,
+                format!(
+                    "基础连接可用，发现 {} 个模型；需要重新应用配置以验证 Responses",
+                    models.len()
+                ),
+            ),
             Err(error) => (false, friendly_error(&error)),
         },
         None => (false, "尚未配置 Router".to_string()),
     };
+    let router_responses_verified = state
+        .as_ref()
+        .is_some_and(|saved| saved.responses_verified_at.is_some());
+    let router_last_verified_at = state
+        .as_ref()
+        .and_then(|saved| saved.responses_verified_at.clone());
 
     let backup_available = latest_configuration_snapshot(&paths)?.is_some();
     Ok(SystemStatusV1::from_input(SystemStatusInput {
@@ -647,6 +670,8 @@ fn collect_system_status() -> Result<SystemStatusV1, String> {
         config_path: paths.codex_config_path.to_string_lossy().to_string(),
         router_reachable,
         router_detail,
+        router_responses_verified,
+        router_last_verified_at,
         configured_gateway: state.as_ref().map(|saved| saved.gateway_base_url.clone()),
         configured_model: state.as_ref().map(|saved| saved.model.clone()),
         key_configured: state
@@ -686,14 +711,23 @@ fn discover_models_inner(request: GatewayProbeRequest) -> Result<ModelDiscovery,
 
 fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
     let operation_id = new_operation_id();
-    let stages: [(SetupStageV1, &str, StageRunner); 5] = [
+    let stages: [(SetupStageV1, &str, StageRunner); 6] = [
         (SetupStageV1::Preflight, "检查本机环境", preflight_setup),
         (
             SetupStageV1::InstallChatgpt,
             "准备 ChatGPT",
             install_chatgpt,
         ),
-        (SetupStageV1::ValidateRouter, "验证 Router", validate_router),
+        (
+            SetupStageV1::ValidateRouter,
+            "读取 Router 模型",
+            validate_router,
+        ),
+        (
+            SetupStageV1::ValidateRouterResponse,
+            "验证实际请求",
+            validate_router_response,
+        ),
         (
             SetupStageV1::ConfigureCodex,
             "写入 Codex 配置",
@@ -704,6 +738,7 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
     let mut ctx = InstallContext {
         options,
         models: Vec::new(),
+        responses_probe: None,
     };
     let mut results = Vec::new();
     let mut success = true;
@@ -852,21 +887,7 @@ fn install_chatgpt(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
 }
 
 fn validate_router(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOutcome, String> {
-    let paths = resolve_paths()?;
-    let saved = read_state(&paths).ok();
-    let bearer = if ctx.options.no_auth {
-        None
-    } else if !ctx.options.key.is_empty() {
-        Some(ctx.options.key.clone())
-    } else {
-        match saved {
-            Some(state) if state.gateway_base_url == ctx.options.gateway => {
-                gateway_bearer_from_state(&state)?
-            }
-            _ => return Err("请输入 Access Key，或选择“此 Router 无需 Key”".to_string()),
-        }
-    };
-
+    let bearer = setup_bearer(ctx)?;
     let models = fetch_models(&ctx.options.gateway, bearer.as_deref())?;
     if ctx.options.model.is_empty() {
         ctx.options.model = models[0].clone();
@@ -885,7 +906,81 @@ fn validate_router(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
     ))
 }
 
+fn validate_router_response(
+    app: &AppHandle,
+    ctx: &mut InstallContext,
+) -> Result<StageOutcome, String> {
+    if ctx.options.model.is_empty() || !ctx.models.iter().any(|model| model == &ctx.options.model) {
+        return Err("Responses 验证前未获得有效模型".to_string());
+    }
+    let bearer = setup_bearer(ctx)?;
+    let probe = match RouterClient::new(&ctx.options.gateway, bearer.as_deref())
+        .probe_responses(&ctx.options.model)
+    {
+        Ok(probe) => probe,
+        Err(error) => {
+            invalidate_responses_evidence(&ctx.options.gateway, &ctx.options.model)?;
+            emit_log(app, "[INFO] Previous Responses verification invalidated\n");
+            return Err(error);
+        }
+    };
+    emit_log(app, "[OK] Responses probe completed\n");
+    emit_log(app, format!("[OK] Protocol: {}\n", probe.protocol));
+    if let Some(request_id) = probe.request_id.as_deref() {
+        emit_log(app, format!("[OK] Request ID: {request_id}\n"));
+    }
+    let details = json!({
+        "gateway": ctx.options.gateway,
+        "model": probe.model,
+        "protocol": probe.protocol,
+        "requestId": probe.request_id,
+        "completed": probe.completed,
+    });
+    ctx.responses_probe = Some(probe);
+    Ok(StageOutcome::complete("Router 已完成最小 Responses 请求").with_details(details))
+}
+
+fn invalidate_responses_evidence(gateway: &str, model: &str) -> Result<(), String> {
+    let paths = resolve_paths()?;
+    let Ok(mut state) = read_state(&paths) else {
+        return Ok(());
+    };
+    if !responses_evidence_matches(&state, gateway, model) {
+        return Ok(());
+    }
+    state.responses_verified_at = None;
+    state.responses_protocol = None;
+    write_state(&paths, &state).map_err(|error| format!("撤销旧 Responses 验证证据失败: {error}"))
+}
+
+fn responses_evidence_matches(state: &InstallState, gateway: &str, model: &str) -> bool {
+    state.gateway_base_url == gateway
+        && state.model == model
+        && state.responses_verified_at.is_some()
+}
+
+fn setup_bearer(ctx: &InstallContext) -> Result<Option<String>, String> {
+    if ctx.options.no_auth {
+        return Ok(None);
+    }
+    if !ctx.options.key.is_empty() {
+        return Ok(Some(ctx.options.key.clone()));
+    }
+    let paths = resolve_paths()?;
+    match read_state(&paths).ok() {
+        Some(state) if state.gateway_base_url == ctx.options.gateway => {
+            gateway_bearer_from_state(&state)
+        }
+        _ => Err("请输入 Access Key，或选择“此 Router 无需 Key”".to_string()),
+    }
+}
+
 fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOutcome, String> {
+    let probe = ctx
+        .responses_probe
+        .as_ref()
+        .filter(|probe| probe.completed && probe.model == ctx.options.model)
+        .ok_or_else(|| "Responses 验证未完成，已停止写入配置".to_string())?;
     let paths = resolve_paths()?;
     create_configuration_snapshot(&paths)?;
     let existing = read_state(&paths).ok();
@@ -904,6 +999,8 @@ fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<Stage
             .map(|path| path.to_string_lossy().to_string()),
         secret_storage: token.secret_storage,
         model_catalog_path: None,
+        responses_verified_at: Some(rfc3339_timestamp()?),
+        responses_protocol: Some(probe.protocol.clone()),
         installed_at: unix_timestamp(),
     };
     let catalog = write_model_catalog(&paths, &state)?;
@@ -924,6 +1021,8 @@ fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<Stage
             "provider": state.provider_id,
             "model": state.model,
             "keyProtected": state.token_mode != "none",
+            "responsesVerifiedAt": state.responses_verified_at,
+            "responsesProtocol": state.responses_protocol,
         })),
     )
 }
@@ -938,6 +1037,9 @@ fn verify_setup(app: &AppHandle, _ctx: &mut InstallContext) -> Result<StageOutco
     let models = fetch_models(&state.gateway_base_url, bearer.as_deref())?;
     if !models.iter().any(|model| model == &state.model) {
         return Err("配置的模型已不在 Router 模型列表中".to_string());
+    }
+    if state.responses_verified_at.is_none() {
+        return Err("配置缺少 Responses 验证证据".to_string());
     }
     let app_info = detect_chatgpt_app()?;
     if !app_info.installed {
@@ -3336,98 +3438,7 @@ fn gateway_bearer_from_state(state: &InstallState) -> Result<Option<String>, Str
 }
 
 fn fetch_models(gateway: &str, bearer: Option<&str>) -> Result<Vec<String>, String> {
-    let endpoint = format!("{}/models", gateway.trim_end_matches('/'));
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(4))
-        .timeout_read(Duration::from_secs(8))
-        .timeout_write(Duration::from_secs(8))
-        .build();
-    let mut request = agent.get(&endpoint).set("Accept", "application/json");
-    if let Some(token) = bearer {
-        request = request.set("Authorization", &format!("Bearer {token}"));
-    }
-    let response = request
-        .call()
-        .map_err(|error| http_error("GET /models", gateway, error))?;
-    let body = response
-        .into_string()
-        .map_err(|error| format!("读取 /models 响应失败: {error}"))?;
-    let payload: serde_json::Value =
-        serde_json::from_str(&body).map_err(|error| format!("/models 未返回有效 JSON: {error}"))?;
-    let mut models = payload
-        .get("data")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("id").and_then(|value| value.as_str()))
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    models.sort();
-    models.dedup();
-    if models.is_empty() {
-        if is_local_ollama_gateway(gateway) {
-            return Err(
-                "Ollama 已启动，但尚未返回模型。请先运行 ollama pull <模型名> 下载至少一个模型"
-                    .to_string(),
-            );
-        }
-        return Err("Router /models 没有返回可用模型".to_string());
-    }
-    Ok(models)
-}
-
-fn is_local_ollama_gateway(gateway: &str) -> bool {
-    Url::parse(gateway)
-        .ok()
-        .map(|url| {
-            matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
-                && url.port_or_known_default() == Some(11434)
-        })
-        .unwrap_or(false)
-}
-
-fn is_ollama_gateway(gateway: &str) -> bool {
-    Url::parse(gateway)
-        .ok()
-        .and_then(|url| url.port_or_known_default())
-        == Some(11434)
-}
-
-fn local_ollama_connection_error() -> String {
-    if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
-        return "未检测到 Windows 本机 Ollama 服务。当前是 Windows ARM64；请确认 Ollama 已安装并启动，或填写 macOS 宿主机可访问地址。127.0.0.1 只指向此 Windows VM".to_string();
-    }
-    "未检测到本机 Ollama 服务。请先安装并启动 Ollama；如果 Ollama 在虚拟机宿主机上，请填写宿主机可访问地址，不能使用 127.0.0.1".to_string()
-}
-
-fn remote_ollama_connection_error(gateway: &str) -> String {
-    if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
-        return format!(
-            "无法连接 Ollama：{gateway}。该地址的 11434 端口没有服务监听。若 Ollama 运行在 Parallels 的 macOS 宿主机，请先启动宿主机桥接，并使用 http://10.211.55.2:11434/v1；macOS Wi-Fi 地址不能替代未开放的 Ollama 监听地址"
-        );
-    }
-    format!("无法连接 Ollama：{gateway}。请确认 Ollama 已启动，并监听当前设备可访问的网络接口")
-}
-
-fn http_error(operation: &str, gateway: &str, error: ureq::Error) -> String {
-    match error {
-        ureq::Error::Status(code, _) if code == 401 || code == 403 => {
-            format!("{operation} 鉴权失败（HTTP {code}），请检查 Access Key")
-        }
-        ureq::Error::Status(code, _) => format!("{operation} 返回 HTTP {code}"),
-        ureq::Error::Transport(_) if is_local_ollama_gateway(gateway) => {
-            local_ollama_connection_error()
-        }
-        ureq::Error::Transport(_) if is_ollama_gateway(gateway) => {
-            remote_ollama_connection_error(gateway)
-        }
-        ureq::Error::Transport(error) => format!("无法连接 Router：{error}"),
-    }
+    RouterClient::new(gateway, bearer).fetch_models()
 }
 
 fn normalize_gateway(input: &str) -> Result<String, String> {
@@ -3625,6 +3636,12 @@ fn unix_timestamp() -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
+fn rfc3339_timestamp() -> Result<String, String> {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|error| format!("生成验证时间失败: {error}"))
+}
+
 fn friendly_error(error: &str) -> String {
     redact_error(error).replace("Transport(Transport", "连接错误(")
 }
@@ -3636,6 +3653,7 @@ fn command_error(stage: impl Into<String>, error: impl AsRef<str>) -> ErrorEnvel
 fn setup_error_stage(stage: SetupStageV1) -> &'static str {
     match stage {
         SetupStageV1::ValidateRouter => "validate_router_models",
+        SetupStageV1::ValidateRouterResponse => "validate_router_response",
         _ => stage.as_str(),
     }
 }
@@ -3946,17 +3964,31 @@ mod tests {
 
     #[test]
     fn local_ollama_detection_is_loopback_and_port_specific() {
-        assert!(is_local_ollama_gateway("http://127.0.0.1:11434/v1"));
-        assert!(is_local_ollama_gateway("http://localhost:11434/v1"));
-        assert!(!is_local_ollama_gateway("http://10.211.55.2:11434/v1"));
-        assert!(!is_local_ollama_gateway("http://127.0.0.1:1234/v1"));
+        assert!(router_client::is_local_ollama_gateway(
+            "http://127.0.0.1:11434/v1"
+        ));
+        assert!(router_client::is_local_ollama_gateway(
+            "http://localhost:11434/v1"
+        ));
+        assert!(!router_client::is_local_ollama_gateway(
+            "http://10.211.55.2:11434/v1"
+        ));
+        assert!(!router_client::is_local_ollama_gateway(
+            "http://127.0.0.1:1234/v1"
+        ));
     }
 
     #[test]
     fn ollama_detection_accepts_remote_port() {
-        assert!(is_ollama_gateway("http://10.211.55.2:11434/v1"));
-        assert!(is_ollama_gateway("http://192.168.50.130:11434/v1"));
-        assert!(!is_ollama_gateway("http://192.168.50.130:1234/v1"));
+        assert!(router_client::is_ollama_gateway(
+            "http://10.211.55.2:11434/v1"
+        ));
+        assert!(router_client::is_ollama_gateway(
+            "http://192.168.50.130:11434/v1"
+        ));
+        assert!(!router_client::is_ollama_gateway(
+            "http://192.168.50.130:1234/v1"
+        ));
     }
 
     #[test]
@@ -4156,6 +4188,8 @@ model = "gpt-5"
             key_path: Some(root.join("router-key.secret").to_string_lossy().to_string()),
             secret_storage: Some(token_support::SECRET_STORAGE_DPAPI.to_string()),
             model_catalog_path: Some(root.join("models.json").to_string_lossy().to_string()),
+            responses_verified_at: Some(unix_timestamp()),
+            responses_protocol: Some("sse".to_string()),
             installed_at: unix_timestamp(),
         };
         let helper = TokenHelperCommand {
@@ -4174,6 +4208,50 @@ model = "gpt-5"
         assert!(config.contains("--codex-assistant-token-helper"));
         assert!(!config.contains("powershell.exe"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_responses_evidence_is_only_revoked_for_the_same_router_and_model() {
+        let state = InstallState {
+            version: VERSION.to_string(),
+            provider_id: PROVIDER_ID.to_string(),
+            provider_display_name: PROVIDER_NAME.to_string(),
+            model: "model-a".to_string(),
+            gateway_base_url: "http://127.0.0.1:11434/v1".to_string(),
+            token_mode: "none".to_string(),
+            wire_api: "responses".to_string(),
+            available_models: vec!["model-a".to_string()],
+            key_path: None,
+            secret_storage: None,
+            model_catalog_path: None,
+            responses_verified_at: Some("2026-07-28T10:00:00Z".to_string()),
+            responses_protocol: Some("sse".to_string()),
+            installed_at: "2026-07-28T10:00:00Z".to_string(),
+        };
+
+        assert!(responses_evidence_matches(
+            &state,
+            "http://127.0.0.1:11434/v1",
+            "model-a"
+        ));
+        assert!(!responses_evidence_matches(
+            &state,
+            "http://127.0.0.1:11435/v1",
+            "model-a"
+        ));
+        assert!(!responses_evidence_matches(
+            &state,
+            "http://127.0.0.1:11434/v1",
+            "model-b"
+        ));
+
+        let mut unverified = state;
+        unverified.responses_verified_at = None;
+        assert!(!responses_evidence_matches(
+            &unverified,
+            "http://127.0.0.1:11434/v1",
+            "model-a"
+        ));
     }
 
     #[test]

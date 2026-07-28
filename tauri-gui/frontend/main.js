@@ -34,7 +34,8 @@ const ICONS = {
 const TASKS = [
   { id: "preflight", label: "检查本机环境", waiting: "检查配置目录和系统安装能力" },
   { id: "install_chatgpt", label: "准备 ChatGPT", waiting: "检测官方应用，缺失时通过 Microsoft Store 安装" },
-  { id: "validate_router", label: "验证 Router", waiting: "连接 /v1/models 并核对模型" },
+  { id: "validate_router", label: "读取 Router 模型", waiting: "连接 /v1/models 并核对模型" },
+  { id: "validate_router_response", label: "验证实际请求", waiting: "发送固定低成本请求并确认 /v1/responses 可用" },
   { id: "configure_codex", label: "写入 Codex 配置", waiting: "安全保存认证信息并更新 config.toml" },
   { id: "verify", label: "复核配置", waiting: "再次检查应用、配置和 Router" },
 ];
@@ -522,6 +523,7 @@ function renderTasks() {
     const status = state.tasks[task.id] || "waiting";
     const item = document.createElement("div");
     item.className = `task-item ${status}`;
+    item.dataset.taskId = task.id;
     const icon = document.createElement("span");
     icon.className = "task-icon";
     icon.innerHTML = taskIcon(status);

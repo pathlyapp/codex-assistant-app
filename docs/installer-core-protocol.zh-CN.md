@@ -33,7 +33,7 @@ V1 同时保留 0.8.x 扁平字段一个兼容周期。前端适配器只允许�
 - 当前平台与 CPU 架构。
 - Codex managed config 是否完整。
 - 已配置 Router/模型。
-- Router `/v1/models` 是否真实可访问。
+- Router `/v1/models` 是否真实可访问，以及最近一次 `/v1/responses` 验证时间。
 - Key 是否已配置，不返回 Key 内容。
 - 是否存在可恢复的 `config.toml.bak.<timestamp>`。
 
@@ -56,6 +56,7 @@ V1 同时保留 0.8.x 扁平字段一个兼容周期。前端适配器只允许�
 preflight
 -> install_chatgpt
 -> validate_router
+-> validate_router_response
 -> configure_codex
 -> verify
 ```
@@ -63,12 +64,21 @@ preflight
 - `preflight`：创建目录，检查配置写入条件，检测官方 ChatGPT 或 winget。
 - `install_chatgpt`：已安装则跳过；否则通过 Microsoft Store ID `9PLM9XGG6VKS` 安装并再次检测。
 - `validate_router`：请求 `/v1/models`，核对选择的模型；连接失败即停止。
+- `validate_router_response`：使用相同网络、代理、CA 和认证路径发送固定低成本
+  `/v1/responses` 流请求；要求收到结构有效、模型一致的 `response.completed`，不保存
+  输出正文。
 - `configure_codex`：加密 Key、写状态/model catalog、备份并使用结构化 TOML API 更新用户级 `config.toml`；只替换助手管理的 provider，保留 ChatGPT 其它设置。
-- `verify`：重新读取状态和配置，再次请求 Router，并再次确认官方 ChatGPT。
+- `verify`：重新读取状态和配置，再次请求模型列表，核对 Responses 验证证据，并再次确认官方 ChatGPT。
 
 任何阶段失败都会产生 `failed` 事件、`ErrorEnvelopeV1` 和非成功结果，不允许用
-warning 代替完成条件。当前最终复核仍以 `/models` 为准；`/responses` 探针属于 M3，
-因此不能把 V1 的 `models_verified` 描述成 Responses 已验证。
+warning 代替完成条件。只有 `/models` 和 `/responses` 均通过后才允许写配置并把
+Router 状态标记为 `responses_verified`；旧状态没有验证证据时只显示
+`models_verified`，整体状态不得为 `ready`。
+
+若相同 Router URL 和模型曾通过验证，但本次 `validate_router_response` 失败，核心只
+撤销运行状态中的 `responsesVerifiedAt/responsesProtocol`，不改写既有
+`config.toml`、模型目录或密钥。状态立即退回 `models_verified`，用户修复 Router 后
+可以直接重试；新 Router 或新模型的失败不会错误清除其它组合的证据。
 
 ### `launch_chatgpt`
 
@@ -103,12 +113,12 @@ warning 代替完成条件。当前最终复核仍以 `/models` 为准；`/respo
 {
   "schemaVersion": 1,
   "operationId": "uuid",
-  "stage": "validate_router",
-  "label": "验证 Router",
+  "stage": "validate_router_response",
+  "label": "验证实际请求",
   "status": "waiting|running|complete|skipped|failed|restored",
   "message": "用户可读状态",
-  "current": 3,
-  "total": 5,
+  "current": 4,
+  "total": 6,
   "cancellable": false,
   "recoverable": false,
   "details": {}

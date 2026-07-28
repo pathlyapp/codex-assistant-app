@@ -78,6 +78,12 @@
 | M1 最新 x64 兼容层冒烟 | 通过 | ARM64 OS 上静默安装不自启、首次响应、重复启动 1 个进程；不替代真实 x64 |
 | Windows UI E2E 首次执行 | 失败 | envelope 通用文案覆盖 Windows ARM64/VM Ollama 专用提示，测试在写配置前阻断 |
 | Windows UI E2E 修复后 | 通过 | `ROUTER_VM_LOOPBACK` 保留专用提示；首页/配置/诊断状态一致；配置期间 ChatGPT 进程为 0；无 Key `/models` 配置成功；备份入口可见；配置与运行状态恢复 round-trip 通过 |
+| M3 Router 客户端与探针测试 | 通过 | 40 passed，0 failed，1 ignored；覆盖 SSE/JSON 完成、流中断、模型不一致、models 成功但 responses 失败、共享认证路径、输出正文不留存和旧证据精准撤销 |
+| M3 受控测试 Router 冒烟 | 通过 | 仓库内测试服务的 `/models` 与 `/responses` 真实 HTTP/SSE 请求通过 |
+| M3 Windows ARM64 正常 UI E2E | 通过 | `responsesProtocol=sse`；状态为 `responses_verified/ready`；配置期间 ChatGPT 进程为 0 |
+| M3 Windows ARM64 404/断流 UI E2E | 通过 | 两类失败均停在 `validate_router_response`；Codex 配置哈希不变；旧证据撤销；状态退回 `models_verified/ready=false`；恢复正常后重试成功 |
+| M3 Windows ARM64 候选 | 通过 | `c120943`；SHA256 `12ac72e27e1a12920a1173dd80cac1a860fc402648233d424aeb32e5770f2a1b`；原生安装、静默不自启、首次响应、单实例通过 |
+| M3 Windows x64 候选 | 部分通过 | `c120943`；SHA256 `69c9ab9b885f6cff181c2e5d00dfdb717771802a23c5f01dc720062452324346`；目标测试和 ARM64 兼容层安装冒烟通过，真实 x64 待验证 |
 
 首次失败不得从历史中删除。修复后的通过结果应作为新行附加到本节，而不是覆盖原始证据。
 
@@ -89,8 +95,8 @@
 | --- | --- | --- | --- |
 | 全新安装助手 | 部分验证 | 部分验证 | x64 已在 ARM64 兼容层冒烟；ARM64 已完成升级和单实例；仍需两架构干净用户全新安装 |
 | ChatGPT 已安装时跳过 | 待验证 | 部分验证 | 当前用户完整 setup 在官方 ChatGPT 已安装时通过；仍需显式 stage 断言 |
-| Router 成功 | 待验证 | 部分验证 | ARM64 当前用户通过隔离 `/models` Router 完成真实 UI 模型选择和最终状态 |
-| Router 连接拒绝/超时 | 待验证 | 部分验证 | ARM64 UI 验证 `ROUTER_VM_LOOPBACK` 专用提示；仍需 setup timeout/拒绝 envelope 证据 |
+| Router 成功 | 待验证 | 部分验证 | ARM64 当前用户通过隔离 Router 完成 `/models`、`/responses`、配置写入和 `ready` 状态；仍需真实 Ollama/LM Studio 与 x64 |
+| Router 连接拒绝/超时 | 待验证 | 部分验证 | ARM64 UI 验证 `ROUTER_VM_LOOPBACK`；Responses 404/断流验证配置不变和证据撤销；仍需模型阶段 timeout/拒绝 envelope |
 | 配置写入与恢复 | 待验证 | 部分验证 | ARM64 当前用户写入、备份入口和完整 restore round-trip 通过；仍需干净用户 |
 | 重复启动与重复提交 | 部分验证 | 部分验证 | 两架构候选重复启动只有一个进程；重复 setup 提交仍待验证 |
 

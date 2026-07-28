@@ -9,22 +9,22 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@571db73` |
+| 开发基线 | `main@35980c0` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m1-core-contracts` |
-| 当前 PR | [#15](https://github.com/theivanxu/codex-assistant/pull/15) |
+| 当前分支 | `feat/m3-responses-probe` |
+| 当前 PR | [#16](https://github.com/theivanxu/codex-assistant/pull/16) |
 | 当前应用版本 | `0.8.8` |
 | 下一内部候选 | `0.9.0-alpha.1` |
-| 当前主里程碑 | M0 平台 E2E 收口；M1 契约收口 |
+| 当前主里程碑 | M0/M1 外部门禁；M3 Router 真实响应验证 |
 
 ## 里程碑状态
 
 | 里程碑 | 状态 | 当前结论 | 退出条件 |
 | --- | --- | --- | --- |
 | M0 规格与基线 | 进行中 | SPEC、追踪矩阵、在线 M0-M7 milestone/Epic 和质量基线已建立 | 真实 x64 与干净用户跨平台 E2E 完成 |
-| M1 状态、错误和工作流契约 | 进行中 | 全部 Tauri command 使用 V1 envelope；状态、阶段事件、跨平台错误 fixture 和契约层脱敏已接入 | Windows UI 错误交互复核，补齐取消与跨重启恢复边界 |
+| M1 状态、错误和工作流契约 | 待验证 | PR #15 已合并；全部 Tauri command 使用 V1 envelope，状态、阶段事件、跨平台错误 fixture 和脱敏已接入 | Windows UI 错误交互复核，补齐取消与跨重启恢复边界 |
 | M2 官方应用安装可靠性 | 未开始 | Windows 使用 Store/winget，结果会二次检测 | 可信来源、架构、安装结果和恢复路径可审计 |
-| M3 Router 真实响应验证 | 未开始 | 已验证 `/models`，未验证 `/responses` | 固定低成本响应探针通过，错误分类稳定 |
+| M3 Router 真实响应验证 | 进行中 | `/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
 | M4 配置事务与跨平台密钥 | 未开始 | 有快照和 Windows DPAPI，缺事务清单与 macOS Keychain | 写入可恢复、验证失败自动回滚、两平台密钥安全 |
 | M5 小白用户交互 | 未开始 | 首页和向导可用，但仍依赖部分前端推断 | 唯一主动作、真实状态、失败可恢复、可访问性通过 |
 | M6 诊断与生命周期 | 未开始 | 有基础诊断和手动恢复 | 脱敏诊断包、定向修复、升级/卸载 E2E |
@@ -42,6 +42,10 @@
 | WP-101 SystemStatusV1 | 已验证 | 组合单测；Windows E2E 断言首页、配置页和诊断页消费同一核心状态 | 0.8.x 兼容字段按版本策略后续移除 |
 | WP-102 ErrorEnvelopeV1 | 待验证 | 全部 command 返回稳定 code/support ID；跨平台 fixture；统一脱敏 | Windows UI 逐类错误和推荐动作验收 |
 | WP-103 WorkflowV1 | 进行中 | schema、operation ID、cancellable、合法转换与前端去重 | 未完成事务检测和取消语义转入 M4/M5 |
+| WP-301 统一网络客户端 | 待验证 | `router_client.rs`；models/responses 共用代理、CA、超时和 Bearer 路径 | Windows 企业代理与私有 CA 夹具 |
+| WP-302 模型发现 | 已验证 | 限制响应大小和模型数量；去重、空 ID、提交二次核对及 Windows ARM64 UI E2E | 保持跨平台回归 |
+| WP-303 Responses Probe | 待验证 | 固定 `Return OK.`、16 token、SSE/JSON、完成事件、模型一致性、正文不留存；Windows ARM64 正常/404/断流 E2E | 真实 Ollama/LM Studio 兼容服务 |
+| WP-304 Router 错误 UX | 待验证 | 404 和流中断停在稳定步骤 ID；配置不变、旧证据撤销、状态退回 `models_verified` | 真实服务、代理和私有 CA 错误动作验收 |
 
 ## 证据规则
 
@@ -110,6 +114,31 @@
   可见、恢复 round-trip 完成。使用隔离测试 Router，不将其描述为生产 Router 验证。
 - Windows E2E 增加跨页面状态一致性断言，首页徽标、配置页 Gateway 和诊断摘要均与
   同一次 `SystemStatusV1` 事实源一致；`WP-101` 转为已验证。
+- PR [#15](https://github.com/theivanxu/codex-assistant/pull/15) 全量 CI 通过后 squash
+  合并为 `main@35980c0`，远端 M1 特性分支已删除；M1 Epic 保持开放以追踪剩余门禁。
+- 从 `main@35980c0` 创建 `feat/m3-responses-probe`，开始 M3。
+- 新增统一 Rust Router 客户端；`/models` 与 `/responses` 使用相同 Agent、代理、CA、
+  超时和 Bearer 路径。
+- 配置流程扩展为六阶段；只有固定低成本 Responses 探针收到有效完成事件且返回模型
+  一致，才写入配置和 RFC3339 验证时间。
+- Rust 测试增加到 41 项：40 通过、0 失败、1 个本地 Ollama live test 忽略；覆盖
+  SSE、JSON、流中断、模型不一致、models 成功但 responses 404、认证路径一致和正文
+  不留存，并验证旧 Responses 证据只对相同 Router/模型撤销。
+- 新增 `tools/router-test-server.py`，提供正常、JSON、404、流中断、失败和错误模型
+  六种受控模式；本机真实 HTTP/SSE 冒烟通过。
+- 建立 M3 PR [#16](https://github.com/theivanxu/codex-assistant/pull/16)，关联
+  `ROUT-005` 至 `ROUT-011`、M3 milestone 和 Epic #10。
+- Windows 11 ARM64 当前用户 UI E2E 已验证正常 Responses 完成后状态为
+  `responses_verified/ready`，且配置期间 ChatGPT 进程数保持 0。
+- 同一已验证配置切换到 `responses-404` 和 `disconnect` 后，均停在稳定步骤
+  `validate_router_response`；`config.toml` SHA256 不变，旧 Responses 证据被撤销，
+  状态退回 `action_required/models_verified/ready=false`；恢复正常 Router 后重试成功。
+- 源提交 `c120943` 的 Windows ARM64 候选 SHA256 为
+  `12ac72e27e1a12920a1173dd80cac1a860fc402648233d424aeb32e5770f2a1b`；
+  原生安装、静默不自启、首次响应和单实例通过。
+- 同一提交的 Windows x64 候选 SHA256 为
+  `69c9ab9b885f6cff181c2e5d00dfdb717771802a23c5f01dc720062452324346`；
+  x64 目标测试和 ARM64 兼容层安装冒烟通过，不替代真实 x64 机器门禁。
 
 ## GitHub 追踪
 

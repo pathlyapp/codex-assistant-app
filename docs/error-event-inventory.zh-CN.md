@@ -54,9 +54,10 @@
 | --- | --- | --- | --- |
 | 1 | `preflight` | `running/complete/failed` | 取消语义转入 M5 |
 | 2 | `install_chatgpt` | `running/complete/skipped/failed` | 安装来源和可信结果未结构化 |
-| 3 | `validate_router` | `running/complete/failed` | 应拆分 models 与 responses |
-| 4 | `configure_codex` | `running/complete/failed` | transaction ID 和 rollback 事件转入 M4 |
-| 5 | `verify` | `running/complete/failed` | 仅复查 `/models`，无 Responses |
+| 3 | `validate_router` | `running/complete/failed` | `/models`、模型选择和响应大小受限 |
+| 4 | `validate_router_response` | `running/complete/failed` | SSE/JSON 完成、模型一致性和流中断已验证；相同 Router/模型失败会撤销旧验证证据但不改配置 |
+| 5 | `configure_codex` | `running/complete/failed` | transaction ID 和 rollback 事件转入 M4 |
+| 6 | `verify` | `running/complete/failed` | 复查 `/models`、配置和 Responses 验证证据 |
 
 当前事件字段：`schemaVersion`、`operationId`、`stage`、`label`、`status`、
 `message`、`current`、`total`、`cancellable`、`recoverable`、`details`。

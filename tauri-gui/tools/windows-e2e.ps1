@@ -4,6 +4,7 @@ param(
   [int]$DebugPort = 9223,
   [switch]$LaunchAfterSetup,
   [switch]$TestRestore,
+  [switch]$ExpectSetupFailure,
   [ValidateSet("none", "focus", "custom", "official")]
   [string]$ApplyAppearance = "none",
   [string]$ThemeImagePath = ""
@@ -199,6 +200,24 @@ if ($connection.className -notmatch "success") { throw "Router UI test failed: $
 if ($connection.gateway -ne $RouterUrl) { throw "Router input changed unexpectedly: $($connection.gateway)" }
 if (!$connection.selectedModel) { throw "Router returned no selectable model" }
 
+$configExistedBeforeSetup = Test-Path $configPath
+$configHashBeforeSetup = if ($configExistedBeforeSetup) {
+  (Get-FileHash $configPath -Algorithm SHA256).Hash
+} else {
+  ""
+}
+$runtimeBeforeSetup = if (Test-Path $runtimeConfigPath) {
+  Get-Content $runtimeConfigPath -Raw | ConvertFrom-Json
+} else {
+  $null
+}
+if ($ExpectSetupFailure -and
+    (!$configExistedBeforeSetup -or
+     !$runtimeBeforeSetup -or
+     !$runtimeBeforeSetup.responsesVerifiedAt)) {
+  throw "Expected-failure setup requires an existing Responses-verified configuration"
+}
+
 $chatGptBefore = Get-ChatGptProcessCount
 $result = Invoke-CdpExpression $socket @'
 (async () => {
@@ -212,17 +231,75 @@ $result = Invoke-CdpExpression $socket @'
     title: document.querySelector('#resultTitle').textContent.trim(),
     message: document.querySelector('#resultText').textContent.trim(),
     summary: document.querySelector('#resultSummary').textContent.trim(),
+    failedTaskId: document.querySelector('.task-item.failed')?.dataset.taskId || '',
+    failedStep: document.querySelector('.task-item.failed .task-copy strong')?.textContent.trim() || '',
+    failedMessage: document.querySelector('.task-item.failed .task-copy small')?.textContent.trim() || '',
     logs: document.querySelector('#logOutput').textContent
   };
 })()
 '@ 2
 $chatGptAfter = Get-ChatGptProcessCount
 
-if (!$result.visible -or !$result.success) {
-  throw "Configuration UI did not complete: $($result.title) $($result.message)"
-}
+if (!$result.visible) { throw "Configuration result did not become visible" }
 if ($chatGptBefore -ne 0 -or $chatGptAfter -ne 0) {
   throw "ChatGPT was running during configuration (before=$chatGptBefore, after=$chatGptAfter)"
+}
+
+if ($ExpectSetupFailure) {
+  if ($result.success) { throw "Configuration unexpectedly succeeded" }
+  if ($result.failedTaskId -ne "validate_router_response") {
+    throw "Configuration failed at an unexpected step: $($result.failedTaskId)"
+  }
+  if (!(Test-Path $configPath)) { throw "Existing Codex config was removed after a failed probe" }
+  $configHashAfterSetup = (Get-FileHash $configPath -Algorithm SHA256).Hash
+  if ($configHashAfterSetup -ne $configHashBeforeSetup) {
+    throw "Codex config changed after a failed Responses probe"
+  }
+  if (!(Test-Path $runtimeConfigPath)) { throw "Assistant runtime state was removed after a failed probe" }
+  $runtimeAfterFailure = Get-Content $runtimeConfigPath -Raw | ConvertFrom-Json
+  if ($runtimeAfterFailure.gatewayBaseUrl -ne $runtimeBeforeSetup.gatewayBaseUrl -or
+      $runtimeAfterFailure.model -ne $runtimeBeforeSetup.model -or
+      $runtimeAfterFailure.tokenMode -ne $runtimeBeforeSetup.tokenMode) {
+    throw "Router identity or token mode changed after a failed Responses probe"
+  }
+  if ($runtimeAfterFailure.responsesVerifiedAt -or $runtimeAfterFailure.responsesProtocol) {
+    throw "Failed Responses probe left stale verification evidence in runtime state"
+  }
+  $statusAfterFailure = Invoke-CdpExpression $socket @'
+(async () => {
+  const status = await window.__TAURI__.core.invoke('get_system_status');
+  return {
+    overall: status.overall,
+    routerState: status.router?.state,
+    lastVerifiedAt: status.router?.lastVerifiedAt,
+    ready: status.ready
+  };
+})()
+'@ 19
+  if ($statusAfterFailure.routerState -ne "models_verified" -or
+      $statusAfterFailure.lastVerifiedAt -or
+      $statusAfterFailure.ready) {
+    throw "SystemStatusV1 retained stale readiness after a failed Responses probe: $($statusAfterFailure | ConvertTo-Json -Compress)"
+  }
+  $socket.Dispose()
+  [pscustomobject]@{
+    success = $true
+    expectedFailure = $true
+    router = $RouterUrl
+    selectedModel = $connection.selectedModel
+    failedTaskId = $result.failedTaskId
+    failedStep = $result.failedStep
+    failedMessage = $result.failedMessage
+    configUnchanged = $true
+    evidenceInvalidated = $true
+    systemStatus = $statusAfterFailure
+    chatGptProcessCountDuringSetup = $chatGptAfter
+  } | ConvertTo-Json -Depth 5 -Compress
+  return
+}
+
+if (!$result.success) {
+  throw "Configuration UI did not complete: $($result.title) $($result.message)"
 }
 
 $backupUiVisible = Invoke-CdpExpression $socket @'
@@ -246,6 +323,26 @@ $configText = Get-Content $configPath -Raw
 if ($configText -notmatch [regex]::Escape($RouterUrl)) { throw "Codex config does not contain the tested Router URL" }
 if ($configText -notmatch [regex]::Escape($connection.selectedModel)) { throw "Codex config does not contain the selected model" }
 $runtimeState = Get-Content $runtimeConfigPath -Raw | ConvertFrom-Json
+if (!$runtimeState.responsesVerifiedAt -or $runtimeState.responsesProtocol -notin @("sse", "json")) {
+  throw "Runtime state does not contain valid Responses verification evidence"
+}
+$statusAfterSetup = Invoke-CdpExpression $socket @'
+(async () => {
+  const status = await window.__TAURI__.core.invoke('get_system_status');
+  return {
+    overall: status.overall,
+    routerState: status.router?.state,
+    lastVerifiedAt: status.router?.lastVerifiedAt,
+    ready: status.ready
+  };
+})()
+'@ 20
+if ($statusAfterSetup.overall -ne "ready" -or
+    $statusAfterSetup.routerState -ne "responses_verified" -or
+    !$statusAfterSetup.lastVerifiedAt -or
+    !$statusAfterSetup.ready) {
+  throw "SystemStatusV1 did not become Responses-verified after setup: $($statusAfterSetup | ConvertTo-Json -Compress)"
+}
 $keyConfigured = [bool]$RouterKey
 if ($keyConfigured) {
   if ($runtimeState.tokenMode -ne "static" -or $runtimeState.secretStorage -ne "dpapi") {
