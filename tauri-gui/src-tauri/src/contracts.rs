@@ -279,12 +279,20 @@ fn classify_legacy_error(stage: &str, detail: &str) -> &'static str {
         || lower.contains("reboot required")
         || lower.contains("需要重启系统")
         || lower.contains("退出码 3010")
+        || lower.contains("exit code: 3010")
+        || lower.contains("exit code 3010")
     {
         "APP_RESTART_REQUIRED"
-    } else if lower.contains("official")
+    } else if (lower.contains("official")
         && (lower.contains("still")
             || lower.contains("仍未检测到")
-            || lower.contains("未检测到 chatgpt"))
+            || lower.contains("未检测到 chatgpt")))
+        || lower.contains("winget")
+        || lower.contains("安装适配器")
+        || (stage == "install_chatgpt"
+            && (lower.contains("installer")
+                || lower.contains("安装渠道")
+                || lower.contains("官方安装命令")))
     {
         "APP_INSTALL_FAILED"
     } else if lower.contains("未检测到 chatgpt") || lower.contains("chatgpt 尚未安装") {
@@ -1018,6 +1026,11 @@ mod tests {
                 "install_chatgpt",
                 "package signature publisher mismatch",
                 "APP_PACKAGE_UNTRUSTED",
+            ),
+            (
+                "preflight",
+                "系统缺少 winget（Windows App Installer），无法调用 Microsoft Store 官方安装渠道",
+                "APP_INSTALL_FAILED",
             ),
             (
                 "verify",

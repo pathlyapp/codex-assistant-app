@@ -4,12 +4,16 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     env, fs,
-    io::{BufRead, BufReader},
     net::TcpListener,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     thread,
     time::{Duration, Instant},
+};
+#[cfg(target_os = "windows")]
+use std::{
+    io::{BufRead, BufReader},
+    process::Stdio,
 };
 use tauri::{AppHandle, Emitter, Manager};
 use toml_edit::{value, Array, DocumentMut, Item, Table};
@@ -21,6 +25,7 @@ use std::io::{Cursor, Read};
 mod config_transaction;
 mod contracts;
 mod official_app;
+mod official_installer;
 mod router_client;
 mod token_support;
 
@@ -30,6 +35,7 @@ use contracts::{
     SystemStatusInput, SystemStatusV1, SCHEMA_VERSION_V1,
 };
 use official_app::{detect_chatgpt_app, DesktopAppInfo};
+use official_installer::{install_official_chatgpt, preferred_installer_availability};
 use router_client::{ResponsesProbeResult, RouterClient};
 
 const VERSION: &str = "0.8.8";
@@ -40,7 +46,6 @@ const LEGACY_CONFIG_END: &str = "# <<< CompanyCodex Gateway PoC";
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:11434/v1";
 const PROVIDER_ID: &str = "codex_assistant_router";
 const PROVIDER_NAME: &str = "Codex Assistant Router";
-const WINDOWS_STORE_ID: &str = "9PLM9XGG6VKS";
 const APPEARANCE_PORT: u16 = 9335;
 const MAX_THEME_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_THEME_IMAGE_DIMENSION: u32 = 16_384;
@@ -935,11 +940,11 @@ fn preflight_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
             detected.detail
         ));
     } else if ctx.options.install_chatgpt && cfg!(target_os = "windows") {
-        let winget = resolve_winget()?;
-        emit_log(
-            app,
-            format!("[OK] Official installer available: {winget}\n"),
-        );
+        let installer = preferred_installer_availability()?;
+        if !installer.available {
+            return Err(installer.detail);
+        }
+        emit_log(app, format!("[OK] {}\n", installer.detail));
     } else if ctx.options.install_chatgpt {
         return Err("未检测到 ChatGPT。当前平台请先通过 OpenAI 官方渠道安装 ChatGPT".to_string());
     } else {
@@ -962,10 +967,7 @@ fn install_chatgpt_app_inner(app: &AppHandle) -> Result<SystemStatusV1, String> 
     if !cfg!(target_os = "windows") {
         return Err("当前平台请先通过 OpenAI 官方渠道安装 ChatGPT，再返回助手刷新状态".to_string());
     }
-    install_chatgpt_with_winget(app)?;
-    if !detect_chatgpt_app()?.installed {
-        return Err("官方安装命令已结束，但系统仍未检测到 ChatGPT".to_string());
-    }
+    install_official_chatgpt(app)?;
     collect_system_status()
 }
 
@@ -988,7 +990,7 @@ fn install_chatgpt(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
         return Err("当前版本仅在 Windows 上支持自动安装 ChatGPT".to_string());
     }
 
-    install_chatgpt_with_winget(app)?;
+    let receipt = install_official_chatgpt(app)?;
     let installed = detect_chatgpt_app()?;
     if !installed.installed {
         return Err("官方安装命令已结束，但系统仍未检测到 ChatGPT".to_string());
@@ -997,6 +999,7 @@ fn install_chatgpt(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
         StageOutcome::complete("官方 ChatGPT 已安装").with_details(json!({
             "version": installed.version,
             "detail": installed.detail,
+            "installer": receipt,
         })),
     )
 }
@@ -1193,51 +1196,6 @@ fn verify_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOutcom
             "transactionId": transaction_id,
         })),
     )
-}
-
-fn install_chatgpt_with_winget(app: &AppHandle) -> Result<(), String> {
-    let winget = resolve_winget()?;
-    let args = [
-        "install",
-        "--id",
-        WINDOWS_STORE_ID,
-        "-e",
-        "-s",
-        "msstore",
-        "--accept-source-agreements",
-        "--accept-package-agreements",
-    ];
-    emit_log(
-        app,
-        "正在调用 Microsoft Store 官方安装渠道，此过程可能出现系统确认窗口。\n",
-    );
-    run_command_stream(
-        app,
-        "winget install ChatGPT",
-        &winget,
-        &args,
-        Duration::from_secs(12 * 60),
-        Duration::from_secs(15),
-    )?;
-    if wait_for_chatgpt(Duration::from_secs(90)) {
-        Ok(())
-    } else {
-        Err("winget 已结束，但 90 秒内未检测到 ChatGPT 安装包".to_string())
-    }
-}
-
-fn wait_for_chatgpt(timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if detect_chatgpt_app()
-            .map(|app| app.installed)
-            .unwrap_or(false)
-        {
-            return true;
-        }
-        thread::sleep(Duration::from_secs(2));
-    }
-    false
 }
 
 fn launch_chatgpt_inner() -> Result<(), String> {
@@ -3501,33 +3459,6 @@ fn normalize_gateway(input: &str) -> Result<String, String> {
     Ok(parsed.to_string().trim_end_matches('/').to_string())
 }
 
-fn resolve_winget() -> Result<String, String> {
-    for name in ["winget.exe", "winget"] {
-        if command_exists(name) {
-            return Ok(name.to_string());
-        }
-    }
-    if let Ok(local) = env::var("LOCALAPPDATA") {
-        let path = Path::new(&local)
-            .join("Microsoft")
-            .join("WindowsApps")
-            .join("winget.exe");
-        if path.is_file() {
-            return Ok(path.to_string_lossy().to_string());
-        }
-    }
-    Err(
-        "系统缺少 winget（Windows App Installer），无法调用 Microsoft Store 官方安装渠道"
-            .to_string(),
-    )
-}
-
-fn command_exists(name: &str) -> bool {
-    env::var_os("PATH")
-        .map(|paths| env::split_paths(&paths).any(|path| path.join(name).is_file()))
-        .unwrap_or(false)
-}
-
 #[cfg(target_os = "windows")]
 fn run_command_capture(program: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
     let mut command = Command::new(program);
@@ -3567,6 +3498,7 @@ fn run_command_capture(program: &str, args: &[&str], timeout: Duration) -> Resul
     }
 }
 
+#[cfg(target_os = "windows")]
 fn run_command_stream(
     app: &AppHandle,
     label: &str,
@@ -3641,15 +3573,11 @@ fn run_command_stream(
     }
 }
 
+#[cfg(target_os = "windows")]
 fn hide_console_window(command: &mut Command) {
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    #[cfg(not(target_os = "windows"))]
-    let _ = command;
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    command.creation_flags(CREATE_NO_WINDOW);
 }
 
 fn platform_name() -> &'static str {
