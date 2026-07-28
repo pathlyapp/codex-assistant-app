@@ -543,6 +543,47 @@ if (!$backupUiVisible.targetedRepairPanel -or !$backupUiVisible.fixedDiagnosticR
   throw "Diagnostics does not use the targeted repair panel"
 }
 
+$lifecycleUi = Invoke-CdpExpression $socket @'
+(async () => {
+  const status = await window.__TAURI__.core.invoke('get_lifecycle_status');
+  document.querySelector('[data-view="diagnostics"]').click();
+  const deadline = Date.now() + 10000;
+  const uninstall = document.querySelector('#uninstallAssistantButton');
+  const restore = document.querySelector('#restoreManagedConfigButton');
+  const deleteData = document.querySelector('#deleteAssistantDataButton');
+  while (
+    (uninstall.disabled || restore.disabled || !deleteData.disabled) &&
+    Date.now() < deadline
+  ) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return {
+    status,
+    oldFactoryResetAbsent: !document.querySelector('#factoryResetButton'),
+    uninstallEnabled: !uninstall.disabled,
+    restoreConfigEnabled: !restore.disabled,
+    deleteDataBlocked: deleteData.disabled,
+    officialManagementEnabled: !document.querySelector('#openOfficialAppManagementButton').disabled
+  };
+})()
+'@ 24
+if (!$lifecycleUi.status.defaultPreservesConfig -or
+    !$lifecycleUi.status.defaultPreservesData -or
+    !$lifecycleUi.status.defaultPreservesOfficialApp -or
+    !$lifecycleUi.status.assistantUninstallAvailable -or
+    !$lifecycleUi.status.managedConfigPresent -or
+    !$lifecycleUi.status.assistantDataPresent -or
+    !$lifecycleUi.status.dataRemovalBlocked -or
+    !$lifecycleUi.status.officialAppInstalled -or
+    !$lifecycleUi.status.officialAppTrusted -or
+    !$lifecycleUi.oldFactoryResetAbsent -or
+    !$lifecycleUi.uninstallEnabled -or
+    !$lifecycleUi.restoreConfigEnabled -or
+    !$lifecycleUi.deleteDataBlocked -or
+    !$lifecycleUi.officialManagementEnabled) {
+  throw "Lifecycle boundaries are not represented by real status and independent controls: $($lifecycleUi | ConvertTo-Json -Depth 6 -Compress)"
+}
+
 if (!(Test-Path $configPath)) { throw "Codex config was not written" }
 if (!(Test-Path $runtimeConfigPath)) { throw "Assistant runtime config was not written" }
 $configText = Get-Content $configPath -Raw
@@ -938,6 +979,12 @@ $socket.Dispose()
   chatGptLaunchedAfterExplicitAction = $chatGptLaunched
   backupAvailableInUi = [bool]$backupUiVisible.home
   targetedRepairPanel = [bool]($backupUiVisible.targetedRepairPanel -and $backupUiVisible.fixedDiagnosticRestoreAbsent)
+  lifecycleBoundaries = [bool](
+    $lifecycleUi.status.defaultPreservesConfig -and
+    $lifecycleUi.status.defaultPreservesData -and
+    $lifecycleUi.status.defaultPreservesOfficialApp -and
+    $lifecycleUi.oldFactoryResetAbsent
+  )
   diagnosticSupportId = $diagnosticBundle.supportId
   diagnosticBundleSha256 = $diagnosticBundle.sha256
   diagnosticUiDownloadSha256 = $diagnosticUiDownloadSha256

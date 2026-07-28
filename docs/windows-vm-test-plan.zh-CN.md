@@ -264,6 +264,39 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows-repair-e2e.ps1 `
 5. 收据必须为 `models_verified -> responses_verified`、`changed=true`，
    `config.toml` SHA256 不变；修复后方案必须为 `not_needed`。
 
+### M6 卸载与数据边界
+
+普通 UI E2E 必须确认：
+
+- 旧“一键还原”入口不存在。
+- 助手卸载默认保留 ChatGPT、Codex 配置和助手数据。
+- 受管配置存在时“删除数据”禁用，核心直接调用也返回
+  `LIFECYCLE_DATA_IN_USE`。
+
+完整生命周期验收：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows-lifecycle-e2e.ps1 `
+  -TestDefaultUninstall `
+  -InstallerPath C:\path\CodexAssistant-0.8.8-windows-arm64-setup.exe `
+  -ExpectedSha256 <sha256>
+```
+
+脚本必须由交互用户运行。它通过真实页面依次恢复助手管理的配置、删除助手数据，
+验证无关 TOML 和 ChatGPT 保留；再对精确 SHA256 候选执行 NSIS 静默卸载，确认默认
+不删除配置、数据 sentinel 或 `OpenAI.Codex` 包，最后重装同一候选。
+助手内交互卸载还必须先展示 `handoff_started` 收据，再显式完成退出交接；测试同时
+识别安装目录中的 `uninstall.exe` 和 NSIS 临时目录中的 `Un.exe`。
+
+2026-07-28 候选证据：
+
+- ARM64：5,623,641 字节，SHA256
+  `515e135549ca02715a557f7a695bc96405cb5433a8f2ada9fc2ae5c0c568337c`。
+- x64：6,007,909 字节，SHA256
+  `46eb890c23cabfd69bac0daf785392453114dd77b263ab2ff1c2b97bb92cf427`。
+- ARM64 原生和 x64 兼容层的安装烟测、完整 UI E2E、交互卸载 handoff、默认卸载
+  保留和同候选重装均通过；真实 x64 硬件仍是发布门禁。
+
 失败场景：关闭 Ollama 后重新配置，`validate_router` 必须失败，不能显示成功页。
 
 ## 5. 文件与 Key

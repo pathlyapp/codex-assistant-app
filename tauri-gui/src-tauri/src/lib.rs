@@ -25,6 +25,7 @@ use std::io::{Cursor, Read};
 mod config_transaction;
 mod contracts;
 mod diagnostics;
+mod lifecycle;
 mod official_app;
 mod official_installer;
 mod repair;
@@ -37,6 +38,11 @@ use contracts::{
     SystemStatusInput, SystemStatusV1, SCHEMA_VERSION_V1,
 };
 use diagnostics::{DiagnosticBundle, DiagnosticExportRequest};
+use lifecycle::{
+    validate_action as validate_lifecycle_action, LifecycleActionRequest, LifecycleActionResultV1,
+    LifecycleStatusV1, ACTION_DELETE_ASSISTANT_DATA, ACTION_OPEN_OFFICIAL_APP_MANAGEMENT,
+    ACTION_RESTORE_PRE_ASSISTANT_CONFIG, ACTION_UNINSTALL_ASSISTANT,
+};
 use official_app::{detect_chatgpt_app, DesktopAppInfo};
 use official_installer::{install_official_chatgpt, preferred_installer_availability};
 use repair::{
@@ -55,6 +61,9 @@ const DEFAULT_GATEWAY: &str = "http://127.0.0.1:11434/v1";
 const PROVIDER_ID: &str = "codex_assistant_router";
 const PROVIDER_NAME: &str = "Codex Assistant Router";
 const APPEARANCE_PORT: u16 = 9335;
+#[cfg(target_os = "windows")]
+static ASSISTANT_UNINSTALL_HANDOFF_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 const MAX_THEME_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_THEME_IMAGE_DIMENSION: u32 = 16_384;
 const MAX_THEME_IMAGE_PIXELS: u64 = 50_000_000;
@@ -110,23 +119,6 @@ struct ModelDiscovery {
 struct RestoreResult {
     restored_from: String,
     message: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ResetStepResult {
-    id: String,
-    label: String,
-    status: String,
-    message: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FactoryResetResult {
-    success: bool,
-    summary: String,
-    steps: Vec<ResetStepResult>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -597,11 +589,33 @@ async fn restore_codex_config() -> Result<RestoreResult, ErrorEnvelopeV1> {
 }
 
 #[tauri::command]
-async fn factory_reset() -> Result<FactoryResetResult, ErrorEnvelopeV1> {
-    tauri::async_runtime::spawn_blocking(factory_reset_inner)
+async fn get_lifecycle_status() -> Result<LifecycleStatusV1, ErrorEnvelopeV1> {
+    tauri::async_runtime::spawn_blocking(collect_lifecycle_status)
         .await
-        .map_err(|error| command_error("factory_reset", format!("还原任务失败: {error}")))?
-        .map_err(|error| command_error("factory_reset", error))
+        .map_err(|error| {
+            command_error(
+                "lifecycle_status",
+                format!("读取应用与数据状态失败: {error}"),
+            )
+        })?
+        .map_err(|error| command_error("lifecycle_status", error))
+}
+
+#[tauri::command]
+async fn run_lifecycle_action(
+    app: AppHandle,
+    request: LifecycleActionRequest,
+) -> Result<LifecycleActionResultV1, ErrorEnvelopeV1> {
+    tauri::async_runtime::spawn_blocking(move || run_lifecycle_action_inner(&app, &request))
+        .await
+        .map_err(|error| command_error("lifecycle_action", format!("应用与数据操作失败: {error}")))?
+        .map_err(|error| command_error("lifecycle_action", error))
+}
+
+#[tauri::command]
+async fn complete_assistant_uninstall_handoff(app: AppHandle) -> Result<(), ErrorEnvelopeV1> {
+    complete_assistant_uninstall_handoff_inner(app)
+        .map_err(|error| command_error("lifecycle_action", error))
 }
 
 #[tauri::command]
@@ -1583,144 +1597,6 @@ fn restore_codex_config_inner() -> Result<RestoreResult, String> {
     restore_configuration_snapshot(&resolve_paths()?)
 }
 
-fn reset_step(id: &str, label: &str, status: &str, message: impl Into<String>) -> ResetStepResult {
-    ResetStepResult {
-        id: id.to_string(),
-        label: label.to_string(),
-        status: status.to_string(),
-        message: message.into(),
-    }
-}
-
-fn factory_reset_inner() -> Result<FactoryResetResult, String> {
-    let paths = resolve_paths()?;
-    let detected = detect_chatgpt_app()?;
-    let mut steps = Vec::new();
-
-    if detected.installed {
-        match stop_chatgpt(&detected) {
-            Ok(()) => steps.push(reset_step(
-                "stop",
-                "停止 ChatGPT",
-                "complete",
-                "已停止正在运行的 ChatGPT",
-            )),
-            Err(error) => steps.push(reset_step(
-                "stop",
-                "停止 ChatGPT",
-                "failed",
-                friendly_error(&error),
-            )),
-        }
-        if cfg!(target_os = "windows") {
-            match uninstall_chatgpt() {
-                Ok(()) => steps.push(reset_step(
-                    "uninstall",
-                    "卸载 ChatGPT",
-                    "complete",
-                    "已通过系统官方渠道卸载",
-                )),
-                Err(error) => steps.push(reset_step(
-                    "uninstall",
-                    "卸载 ChatGPT",
-                    "failed",
-                    friendly_error(&error),
-                )),
-            }
-        } else {
-            steps.push(reset_step(
-                "uninstall",
-                "卸载 ChatGPT",
-                "skipped",
-                "当前平台请手动卸载 ChatGPT",
-            ));
-        }
-    } else {
-        steps.push(reset_step(
-            "stop",
-            "停止 ChatGPT",
-            "skipped",
-            "未检测到运行中的 ChatGPT",
-        ));
-        steps.push(reset_step(
-            "uninstall",
-            "卸载 ChatGPT",
-            "skipped",
-            "ChatGPT 未安装，无需卸载",
-        ));
-    }
-
-    match clean_codex_config(&paths.codex_config_path) {
-        Ok(true) => steps.push(reset_step(
-            "config",
-            "移除 Codex 配置",
-            "complete",
-            "已从 config.toml 移除助手写入的配置",
-        )),
-        Ok(false) => steps.push(reset_step(
-            "config",
-            "移除 Codex 配置",
-            "skipped",
-            "没有需要移除的助手配置",
-        )),
-        Err(error) => steps.push(reset_step(
-            "config",
-            "移除 Codex 配置",
-            "failed",
-            friendly_error(&error),
-        )),
-    }
-
-    let data_root = assistant_data_root(&paths);
-    match remove_assistant_data(&data_root) {
-        Ok(true) => steps.push(reset_step(
-            "data",
-            "清除助手数据",
-            "complete",
-            "已删除本地状态、备份、主题和保存的 Key",
-        )),
-        Ok(false) => steps.push(reset_step(
-            "data",
-            "清除助手数据",
-            "skipped",
-            "没有可清除的助手数据",
-        )),
-        Err(error) => steps.push(reset_step(
-            "data",
-            "清除助手数据",
-            "failed",
-            friendly_error(&error),
-        )),
-    }
-
-    let uninstall_expected = detected.installed && cfg!(target_os = "windows");
-    let app_gone = !detect_chatgpt_app()?.installed;
-    let config_clean = !config_mentions_assistant(&paths.codex_config_path);
-    let data_gone = !data_root.exists();
-    let verified = config_clean && data_gone && (!uninstall_expected || app_gone);
-    steps.push(reset_step(
-        "verify",
-        "复核",
-        if verified { "complete" } else { "failed" },
-        if verified {
-            "已恢复初始状态".to_string()
-        } else {
-            "仍有项目未清理干净，请重试一键还原".to_string()
-        },
-    ));
-
-    let success = steps.iter().all(|step| step.status != "failed");
-    Ok(FactoryResetResult {
-        success,
-        summary: if success {
-            "已还原到初始状态".to_string()
-        } else {
-            "还原未完成，请查看失败步骤".to_string()
-        },
-        steps,
-    })
-}
-
 fn assistant_data_root(paths: &InstallerPaths) -> PathBuf {
     match paths.install_root.parent() {
         Some(parent)
@@ -1741,8 +1617,10 @@ fn remove_assistant_data(data_root: &Path) -> Result<bool, String> {
 }
 
 fn clean_codex_config(path: &Path) -> Result<bool, String> {
-    let Ok(existing) = fs::read_to_string(path) else {
-        return Ok(false);
+    let existing = match fs::read_to_string(path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("读取 Codex 配置失败: {error}")),
     };
     let cleaned = remove_managed_blocks(&existing);
     if cleaned.trim() == existing.trim() {
@@ -1755,69 +1633,297 @@ fn clean_codex_config(path: &Path) -> Result<bool, String> {
             let _ = fs::remove_dir(parent);
         }
     } else {
-        fs::write(path, format!("{}\n", cleaned.trim_end()))
+        config_transaction::atomic_write(path, format!("{}\n", cleaned.trim_end()).as_bytes())
             .map_err(|error| format!("重写 Codex 配置失败: {error}"))?;
     }
     Ok(true)
 }
 
-fn config_mentions_assistant(path: &Path) -> bool {
-    fs::read_to_string(path)
-        .map(|content| {
-            content.contains(PROVIDER_ID)
-                || content.contains("model_catalog_json")
-                || content.contains(CONFIG_START)
-                || content.contains(LEGACY_CONFIG_START)
-        })
-        .unwrap_or(false)
+fn managed_config_present(path: &Path) -> Result<bool, String> {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("读取 Codex 配置失败: {error}")),
+    };
+    Ok(content.contains(PROVIDER_ID)
+        || content.contains("model_catalog_json")
+        || content.contains(CONFIG_START)
+        || content.contains(LEGACY_CONFIG_START))
+}
+
+fn collect_lifecycle_status() -> Result<LifecycleStatusV1, String> {
+    let paths = resolve_paths()?;
+    let app = detect_chatgpt_app()?;
+    let (assistant_uninstall_available, assistant_uninstall_mode) =
+        assistant_uninstall_capability();
+    Ok(LifecycleStatusV1::new(
+        assistant_uninstall_mode,
+        assistant_uninstall_available,
+        managed_config_present(&paths.codex_config_path)?,
+        assistant_data_root(&paths).is_dir(),
+        app.installed,
+        app.trusted,
+    ))
+}
+
+fn run_lifecycle_action_inner(
+    app: &AppHandle,
+    request: &LifecycleActionRequest,
+) -> Result<LifecycleActionResultV1, String> {
+    let before_status = collect_lifecycle_status()?;
+    let action_id = validate_lifecycle_action(request, &before_status)?;
+    let before = before_status.snapshot();
+
+    let (status, changed, app_exit_requested, summary) = match action_id {
+        ACTION_RESTORE_PRE_ASSISTANT_CONFIG => {
+            let changed = restore_pre_assistant_config_inner()?;
+            (
+                if changed { "completed" } else { "not_needed" },
+                changed,
+                false,
+                if changed {
+                    "已移除助手管理的 Codex 配置，用户的其他配置保持不变".to_string()
+                } else {
+                    "当前没有助手管理的 Codex 配置".to_string()
+                },
+            )
+        }
+        ACTION_DELETE_ASSISTANT_DATA => {
+            let changed = delete_assistant_data_inner()?;
+            (
+                if changed { "completed" } else { "not_needed" },
+                changed,
+                false,
+                if changed {
+                    "已删除助手运行数据、备份、主题和保存的 Key".to_string()
+                } else {
+                    "当前没有助手运行数据".to_string()
+                },
+            )
+        }
+        ACTION_OPEN_OFFICIAL_APP_MANAGEMENT => {
+            open_official_app_management()?;
+            (
+                "handoff_started",
+                false,
+                false,
+                "已打开系统应用管理；ChatGPT 的卸载由操作系统单独确认".to_string(),
+            )
+        }
+        ACTION_UNINSTALL_ASSISTANT => {
+            let app_exit_requested = launch_assistant_uninstaller(app)?;
+            (
+                "handoff_started",
+                false,
+                app_exit_requested,
+                if app_exit_requested {
+                    "已启动 Codex 助手卸载程序；ChatGPT、Codex 配置和助手数据默认保留".to_string()
+                } else {
+                    "已在 Finder 中定位 Codex 助手；移到废纸篓不会删除 ChatGPT 或配置".to_string()
+                },
+            )
+        }
+        _ => return Err("生命周期动作 ID 无效".to_string()),
+    };
+
+    let after = collect_lifecycle_status()?.snapshot();
+    Ok(LifecycleActionResultV1 {
+        schema_version: SCHEMA_VERSION_V1,
+        action_id: action_id.to_string(),
+        status: status.to_string(),
+        changed,
+        app_exit_requested,
+        summary,
+        before,
+        after,
+    })
+}
+
+fn restore_pre_assistant_config_inner() -> Result<bool, String> {
+    let paths = resolve_paths()?;
+    let managed_files = managed_configuration_files(&paths);
+    config_transaction::recover_interrupted(
+        &paths.install_root,
+        &managed_files,
+        &rfc3339_timestamp()?,
+    )?;
+    if !managed_config_present(&paths.codex_config_path)? {
+        return Ok(false);
+    }
+
+    let transaction_id = new_operation_id();
+    let mut transaction = ConfigTransaction::begin(
+        &paths.install_root,
+        &transaction_id,
+        "lifecycle_restore_config",
+        &rfc3339_timestamp()?,
+        VERSION,
+        &managed_files,
+    )?;
+    transaction.mark_writing()?;
+    let result = clean_codex_config(&paths.codex_config_path).and_then(|changed| {
+        if managed_config_present(&paths.codex_config_path)? {
+            Err("助手管理的 Codex 配置仍然存在".to_string())
+        } else {
+            Ok(changed)
+        }
+    });
+    match result {
+        Ok(changed) => {
+            if let Err(commit_error) = transaction.commit(&rfc3339_timestamp()?) {
+                return match transaction
+                    .rollback(&rfc3339_timestamp()?, &redact_error(&commit_error))
+                {
+                    Ok(()) => Err(format!(
+                        "提交生命周期配置恢复失败，已撤销本次操作: {commit_error}"
+                    )),
+                    Err(rollback_error) => Err(rollback_error),
+                };
+            }
+            Ok(changed)
+        }
+        Err(error) => match transaction.rollback(&rfc3339_timestamp()?, &redact_error(&error)) {
+            Ok(()) => Err(format!("恢复助手修改前配置失败，已撤销本次操作: {error}")),
+            Err(rollback_error) => Err(rollback_error),
+        },
+    }
+}
+
+fn delete_assistant_data_inner() -> Result<bool, String> {
+    let paths = resolve_paths()?;
+    if managed_config_present(&paths.codex_config_path)? {
+        return Err("助手管理的 Codex 配置仍在使用本地数据，请先恢复原配置".to_string());
+    }
+    remove_assistant_data(&assistant_data_root(&paths))
 }
 
 #[cfg(target_os = "windows")]
-fn uninstall_chatgpt() -> Result<(), String> {
-    let script = r#"
-$ErrorActionPreference = 'Stop'
-$packages = @(Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue)
-if ($packages.Count -eq 0) {
-  $packages = @(Get-AppxPackage | Where-Object { $_.PackageFamilyName -like 'OpenAI.Codex_*' })
+fn assistant_uninstaller_path() -> Option<PathBuf> {
+    let current = env::current_exe().ok()?;
+    let parent = current.parent()?;
+    let candidate = parent.join("uninstall.exe");
+    candidate.is_file().then_some(candidate)
 }
-if ($packages.Count -eq 0) { throw '未找到 ChatGPT 安装包' }
-foreach ($pkg in $packages) {
-  Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop
+
+#[cfg(target_os = "macos")]
+fn assistant_bundle_path() -> Option<PathBuf> {
+    env::current_exe().ok()?.ancestors().find_map(|path| {
+        (path.extension().and_then(|value| value.to_str()) == Some("app"))
+            .then(|| path.to_path_buf())
+    })
 }
-'OK'
-"#;
-    run_command_capture(
-        "powershell.exe",
-        &["-NoProfile", "-NonInteractive", "-Command", script],
-        Duration::from_secs(180),
-    )?;
-    if wait_for_chatgpt_removed(Duration::from_secs(60)) {
-        Ok(())
-    } else {
-        Err("卸载命令已结束，但 60 秒内仍能检测到 ChatGPT".to_string())
+
+fn assistant_uninstall_capability() -> (bool, &'static str) {
+    #[cfg(target_os = "windows")]
+    {
+        return (
+            assistant_uninstaller_path().is_some(),
+            if assistant_uninstaller_path().is_some() {
+                "nsis"
+            } else {
+                "unavailable"
+            },
+        );
     }
+    #[cfg(target_os = "macos")]
+    {
+        return (
+            assistant_bundle_path().is_some(),
+            if assistant_bundle_path().is_some() {
+                "finder"
+            } else {
+                "unavailable"
+            },
+        );
+    }
+    #[allow(unreachable_code)]
+    (false, "unsupported")
+}
+
+#[cfg(target_os = "windows")]
+fn launch_assistant_uninstaller(_app: &AppHandle) -> Result<bool, String> {
+    use std::sync::atomic::Ordering;
+
+    let uninstaller = assistant_uninstaller_path()
+        .ok_or_else(|| "当前安装环境没有可信的助手卸载入口".to_string())?;
+    if ASSISTANT_UNINSTALL_HANDOFF_STARTED.swap(true, Ordering::SeqCst) {
+        return Ok(true);
+    }
+    if let Err(error) = Command::new(uninstaller).spawn() {
+        ASSISTANT_UNINSTALL_HANDOFF_STARTED.store(false, Ordering::SeqCst);
+        return Err(format!("启动助手卸载程序失败: {error}"));
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "macos")]
+fn launch_assistant_uninstaller(_app: &AppHandle) -> Result<bool, String> {
+    let bundle =
+        assistant_bundle_path().ok_or_else(|| "当前安装环境没有可定位的助手应用包".to_string())?;
+    Command::new("open")
+        .arg("-R")
+        .arg(bundle)
+        .spawn()
+        .map_err(|error| format!("在 Finder 中定位助手失败: {error}"))?;
+    Ok(false)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn launch_assistant_uninstaller(_app: &AppHandle) -> Result<bool, String> {
+    Err("当前平台不支持从助手内启动卸载".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn complete_assistant_uninstall_handoff_inner(app: AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    if !ASSISTANT_UNINSTALL_HANDOFF_STARTED.swap(false, Ordering::SeqCst) {
+        return Err("助手卸载交接尚未启动".to_string());
+    }
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(500));
+        app.exit(0);
+    });
+    Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
-fn uninstall_chatgpt() -> Result<(), String> {
-    Err("当前平台请手动卸载 ChatGPT".to_string())
+fn complete_assistant_uninstall_handoff_inner(_app: AppHandle) -> Result<(), String> {
+    Err("当前平台不需要助手卸载退出交接".to_string())
 }
 
-#[cfg(target_os = "windows")]
-fn wait_for_chatgpt_removed(timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if detect_chatgpt_app()
-            .map(|app| !app.installed)
-            .unwrap_or(true)
-        {
-            return true;
-        }
-        thread::sleep(Duration::from_secs(2));
+fn open_official_app_management() -> Result<(), String> {
+    let app = detect_chatgpt_app()?;
+    if !app.installed {
+        return Err("当前未检测到 ChatGPT".to_string());
     }
-    detect_chatgpt_app()
-        .map(|app| !app.installed)
-        .unwrap_or(true)
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer.exe")
+            .arg("ms-settings:appsfeatures")
+            .spawn()
+            .map_err(|error| format!("打开系统应用管理失败: {error}"))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let executable = app
+            .executable_path
+            .as_deref()
+            .ok_or_else(|| "无法定位 ChatGPT 应用包".to_string())?;
+        let bundle = Path::new(executable)
+            .ancestors()
+            .find(|path| path.extension().and_then(|value| value.to_str()) == Some("app"))
+            .ok_or_else(|| "无法定位 ChatGPT 应用包".to_string())?;
+        Command::new("open")
+            .arg("-R")
+            .arg(bundle)
+            .spawn()
+            .map_err(|error| format!("在 Finder 中定位 ChatGPT 失败: {error}"))?;
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    Err("当前平台不支持应用管理入口".to_string())
 }
 
 fn collect_appearance_status() -> Result<AppearanceStatus, String> {
@@ -3857,7 +3963,9 @@ pub fn run() {
             launch_chatgpt,
             restart_chatgpt,
             restore_codex_config,
-            factory_reset,
+            get_lifecycle_status,
+            run_lifecycle_action,
+            complete_assistant_uninstall_handoff,
             get_appearance_status,
             apply_appearance,
             import_theme_image,
@@ -4253,7 +4361,7 @@ model = "gpt-5"
         assert!(after.contains("model = \"gpt-5\""));
         assert!(!after.contains(PROVIDER_ID));
         assert!(!after.contains("model_catalog_json"));
-        assert!(!config_mentions_assistant(&config));
+        assert!(!managed_config_present(&config).expect("read managed config state"));
 
         let changed_again = clean_codex_config(&config).expect("second clean");
         assert!(!changed_again);

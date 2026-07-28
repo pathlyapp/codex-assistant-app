@@ -43,6 +43,12 @@
 | `REPAIR_PLAN_STALE` | 执行前复核发现方案已随状态变化 | `repair_execute` | true | `refresh_repair_plan` |
 | `REPAIR_PLAN_FAILED` | 无法读取足够状态生成修复方案 | `repair_plan` | true | `retry_repair_plan` |
 | `REPAIR_EXECUTION_FAILED` | 修复失败且没有更具体的领域错误码 | `repair_execute` | true | `retry_repair` |
+| `LIFECYCLE_ACTION_INVALID` | 生命周期动作不在固定 allowlist | `lifecycle_action` | false | `refresh_lifecycle_status` |
+| `LIFECYCLE_CONFIRMATION_REQUIRED` | 修改性动作缺少精确确认 | `lifecycle_action` | true | `confirm_lifecycle_action` |
+| `LIFECYCLE_DATA_IN_USE` | 受管配置仍依赖助手运行数据 | `lifecycle_action` | true | `restore_pre_assistant_config` |
+| `ASSISTANT_UNINSTALLER_MISSING` | 完整安装版卸载入口缺失 | `lifecycle_action` | true | `open_system_apps` |
+| `LIFECYCLE_STATUS_FAILED` | 无法读取应用与数据边界状态 | `lifecycle_status` | true | `retry_lifecycle_status` |
+| `LIFECYCLE_ACTION_FAILED` | 生命周期动作失败且无更具体分类 | `lifecycle_action` | true | `retry_lifecycle_action` |
 | `INTERNAL_TASK_FAILED` | 后台任务 join/panic 或未知失败 | 当前 command | true | `retry` |
 
 主题、图库和外观错误使用独立 `appearance_*` stage，不改变核心
@@ -83,7 +89,9 @@
 - `launch_chatgpt`
 - `restart_chatgpt`
 - `restore_codex_config`
-- `factory_reset`
+- `get_lifecycle_status`
+- `run_lifecycle_action`
+- `complete_assistant_uninstall_handoff`
 
 外观命令也使用同一 envelope，并以 `appearance_*` stage 隔离：
 
