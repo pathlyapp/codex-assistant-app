@@ -295,6 +295,20 @@
             </div>
             <button id="runDiagnosticsButton" class="secondary-button" type="button"><span class="icon" data-icon="activity"></span><span>重新检查</span></button>
           </div>
+          <section id="repairPanel" class="repair-panel" aria-labelledby="repairTitle">
+            <div class="repair-panel-copy">
+              <div class="repair-panel-heading">
+                <span id="repairState" class="status-badge pending">检查中</span>
+                <code id="repairErrorCode" class="hidden"></code>
+              </div>
+              <h3 id="repairTitle">正在生成修复方案</h3>
+              <p id="repairDetail">助手会根据当前系统状态选择一个安全的处理动作。</p>
+              <div id="repairResult" class="repair-result hidden" role="status"></div>
+            </div>
+            <button id="repairActionButton" class="primary-button hidden" type="button">
+              <span class="icon" data-icon="refresh"></span><span>执行修复</span>
+            </button>
+          </section>
           <div class="diagnostic-list">
             <div><span>操作系统</span><strong id="diagPlatform">检查中</strong></div>
             <div><span>ChatGPT</span><strong id="diagApp">检查中</strong></div>
@@ -306,19 +320,58 @@
           <div class="diagnostic-actions">
             <button id="diagnosticCopyButton" class="secondary-button" type="button"><span class="icon" data-icon="copy"></span><span>复制诊断信息</span></button>
             <button id="diagnosticExportButton" class="secondary-button" type="button"><span class="icon" data-icon="download"></span><span>导出诊断包</span></button>
-            <button id="diagnosticRestoreButton" class="secondary-button" type="button" disabled><span class="icon" data-icon="rotateCcw"></span><span>恢复上次配置</span></button>
           </div>
-          <section class="danger-zone" aria-labelledby="dangerZoneTitle">
-            <div class="danger-zone-head">
+          <section class="lifecycle-panel" aria-labelledby="lifecycleTitle">
+            <div class="lifecycle-panel-head">
               <div>
-                <h2 id="dangerZoneTitle">危险操作</h2>
-                <p>一键还原会停止并卸载 ChatGPT，移除 Codex 配置，并删除助手的全部本地数据（含备份、主题和已保存的 Key），恢复到首次使用前的状态。</p>
+                <h2 id="lifecycleTitle">应用与数据</h2>
+                <p>助手、Codex 配置、助手数据和 ChatGPT 相互独立。卸载助手默认保留其余三项。</p>
               </div>
-              <button id="factoryResetButton" class="secondary-button danger" type="button">
-                <span class="icon" data-icon="trash"></span><span>一键还原</span>
-              </button>
+              <span id="lifecycleState" class="status-badge pending">检查中</span>
             </div>
-            <div id="resetResult" class="reset-result hidden"></div>
+            <div class="lifecycle-list">
+              <div class="lifecycle-row">
+                <span class="icon lifecycle-icon" data-icon="appWindow"></span>
+                <div>
+                  <h3>Codex 助手</h3>
+                  <p id="assistantUninstallDetail">正在检查系统卸载入口。</p>
+                </div>
+                <button id="uninstallAssistantButton" class="secondary-button danger" type="button" disabled>
+                  <span class="icon" data-icon="trash"></span><span>卸载助手</span>
+                </button>
+              </div>
+              <div class="lifecycle-row">
+                <span class="icon lifecycle-icon" data-icon="rotateCcw"></span>
+                <div>
+                  <h3>Codex 配置</h3>
+                  <p id="managedConfigDetail">正在检查助手管理的配置。</p>
+                </div>
+                <button id="restoreManagedConfigButton" class="secondary-button" type="button" disabled>
+                  <span class="icon" data-icon="rotateCcw"></span><span>恢复原配置</span>
+                </button>
+              </div>
+              <div class="lifecycle-row">
+                <span class="icon lifecycle-icon" data-icon="shield"></span>
+                <div>
+                  <h3>助手数据</h3>
+                  <p id="assistantDataDetail">正在检查本地状态、备份、主题和 Key。</p>
+                </div>
+                <button id="deleteAssistantDataButton" class="secondary-button danger" type="button" disabled>
+                  <span class="icon" data-icon="trash"></span><span>删除数据</span>
+                </button>
+              </div>
+              <div class="lifecycle-row">
+                <span class="icon lifecycle-icon" data-icon="externalLink"></span>
+                <div>
+                  <h3>ChatGPT 官方应用</h3>
+                  <p id="officialAppManagementDetail">ChatGPT 始终由操作系统单独管理。</p>
+                </div>
+                <button id="openOfficialAppManagementButton" class="secondary-button" type="button" disabled>
+                  <span class="icon" data-icon="externalLink"></span><span>系统应用管理</span>
+                </button>
+              </div>
+            </div>
+            <div id="lifecycleResult" class="lifecycle-result hidden" role="status"></div>
           </section>
         </section>
 

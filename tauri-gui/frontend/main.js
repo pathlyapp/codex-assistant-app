@@ -42,6 +42,32 @@ const TASKS = [
 ];
 
 const GUIDED_STEPS = ["environment", "app", "service", "verify"];
+const LIFECYCLE_ACTIONS = {
+  uninstall_assistant: {
+    title: "卸载 Codex 助手？",
+    message: "只启动助手自己的系统卸载程序。ChatGPT、Codex 配置和助手数据都会保留。",
+    confirmLabel: "卸载助手",
+    confirmation: "UNINSTALL_ASSISTANT",
+    danger: true,
+  },
+  restore_pre_assistant_config: {
+    title: "恢复助手修改前的 Codex 配置？",
+    message: "将移除助手管理的 Router 配置，同时保留 config.toml 中其他用户配置。操作使用可回滚事务。",
+    confirmLabel: "恢复原配置",
+    confirmation: "RESTORE_MANAGED_CONFIGURATION",
+    danger: false,
+  },
+  delete_assistant_data: {
+    title: "永久删除助手数据？",
+    message: "将删除本地状态、事务备份、主题和保存的 Key。ChatGPT 和非助手管理的 Codex 配置不受影响。",
+    confirmLabel: "删除助手数据",
+    confirmation: "DELETE_ASSISTANT_DATA",
+    danger: true,
+  },
+  open_official_app_management: {
+    confirmation: "",
+  },
+};
 const STAGE_GUIDED_STEP = {
   preflight: "environment",
   install_chatgpt: "app",
@@ -64,7 +90,8 @@ const state = {
   status: null,
   running: false,
   installingApp: false,
-  resetting: false,
+  lifecycleRunning: "",
+  lifecycleStatus: null,
   currentView: "overview",
   tasks: {},
   messages: {},
@@ -88,6 +115,10 @@ const state = {
   confirmResolver: null,
   confirmReturnFocus: null,
   lastResultPayload: null,
+  lastErrorEnvelope: null,
+  repairPlan: null,
+  repairRequestId: 0,
+  repairing: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -119,8 +150,8 @@ function bindUi() {
   $("#setupInstallButton").addEventListener("click", () => installChatGPT({ continueToSetup: true }));
   $("#editConfigButton").addEventListener("click", () => navigate("setup"));
   $("#restoreConfigButton").addEventListener("click", restoreConfiguration);
-  $("#diagnosticRestoreButton").addEventListener("click", restoreConfiguration);
   $("#disconnectRouterButton").addEventListener("click", disconnectRouter);
+  $("#repairActionButton").addEventListener("click", runRecommendedRepair);
   $("#routerForm").addEventListener("submit", applyConfiguration);
   $("#testRouterButton").addEventListener("click", () => testRouter({ announce: true }));
   $("#noAuthInput").addEventListener("change", updateAuthFields);
@@ -144,7 +175,16 @@ function bindUi() {
   $("#exportLogButton").addEventListener("click", exportLog);
   $("#diagnosticCopyButton").addEventListener("click", copyDiagnostics);
   $("#diagnosticExportButton").addEventListener("click", exportDiagnosticBundle);
-  $("#factoryResetButton").addEventListener("click", factoryReset);
+  $("#uninstallAssistantButton").addEventListener("click", () => runLifecycleAction("uninstall_assistant"));
+  $("#restoreManagedConfigButton").addEventListener("click", () =>
+    runLifecycleAction("restore_pre_assistant_config"),
+  );
+  $("#deleteAssistantDataButton").addEventListener("click", () =>
+    runLifecycleAction("delete_assistant_data"),
+  );
+  $("#openOfficialAppManagementButton").addEventListener("click", () =>
+    runLifecycleAction("open_official_app_management"),
+  );
   $$(".theme-card:not(:disabled)").forEach((button) =>
     button.addEventListener("click", () => selectAppearance(button.dataset.theme)),
   );
@@ -184,10 +224,14 @@ function navigate(view) {
     loadGalleryThemes();
   }
   if (view === "setup") renderSetupPrerequisites(state.status);
+  if (view === "diagnostics" && state.status) {
+    refreshRepairPlan();
+    refreshLifecycleStatus();
+  }
 }
 
 async function refreshStatus({ hydrateForm = false } = {}) {
-  if (!tauri?.core || state.running || state.installingApp || state.resetting) return;
+  if (!tauri?.core || state.running || state.installingApp || state.lifecycleRunning) return;
   const button = $("#refreshButton");
   button.disabled = true;
   button.classList.add("spinning");
@@ -197,10 +241,12 @@ async function refreshStatus({ hydrateForm = false } = {}) {
     state.status = status;
     renderSystemStatus(status);
     if (!state.formDirty) hydrateRouterForm(status);
+    await refreshRepairPlan();
   } catch (error) {
     setReadiness("attention", "状态检查失败", friendlyError(error), "重新检查");
     $("#overviewAction").disabled = false;
     renderStatusError(error);
+    renderRepairPlanError(error);
   } finally {
     button.disabled = false;
     button.classList.remove("spinning");
@@ -268,7 +314,6 @@ function renderSystemStatus(status) {
   $("#currentKeyState").textContent = status.keyConfigured ? "已安全保存" : status.configPresent ? "无需 Key" : "未配置";
   $("#restoreConfigButton").classList.toggle("hidden", !status.backupAvailable);
   $("#disconnectRouterButton").classList.toggle("hidden", !status.configPresent);
-  $("#diagnosticRestoreButton").disabled = !status.backupAvailable;
   $("#diagPlatform").textContent = `${status.platform} · ${formatArchitecture(status.architecture)}`;
   $("#diagApp").textContent = `${status.appInstalled ? "正常" : appNeedsRepair ? "需要修复" : "未安装"} · ${status.appDetail}`;
   $("#diagConfig").textContent = status.configPresent ? `有效 · ${status.configuredModel}` : "未配置";
@@ -384,6 +429,125 @@ function onOverviewAction() {
       break;
     default:
       navigate("setup");
+  }
+}
+
+async function refreshRepairPlan() {
+  if (!tauri?.core || !state.status) return;
+  const requestId = ++state.repairRequestId;
+  const errorCode = state.lastErrorEnvelope?.code || state.lastResultPayload?.error?.code || "";
+  renderRepairPlanLoading();
+  try {
+    const plan = await tauri.core.invoke("get_repair_plan", {
+      request: { errorCode },
+    });
+    if (requestId !== state.repairRequestId) return;
+    state.repairPlan = plan;
+    renderRepairPlan(plan);
+  } catch (error) {
+    if (requestId !== state.repairRequestId) return;
+    state.repairPlan = null;
+    renderRepairPlanError(error);
+  }
+}
+
+function renderRepairPlanLoading() {
+  const panel = $("#repairPanel");
+  panel.className = "repair-panel";
+  setBadge($("#repairState"), "检查中", "pending");
+  $("#repairTitle").textContent = "正在生成修复方案";
+  $("#repairDetail").textContent = "助手会根据当前系统状态选择一个安全的处理动作。";
+  $("#repairErrorCode").classList.add("hidden");
+  $("#repairActionButton").classList.add("hidden");
+}
+
+function renderRepairPlan(plan) {
+  const panel = $("#repairPanel");
+  panel.className = `repair-panel ${String(plan.state || "").replaceAll("_", "-")}`;
+  const labels = {
+    action_available: ["可自动修复", "warning"],
+    manual_required: ["需人工处理", "warning"],
+    not_needed: ["无需修复", "success"],
+  };
+  const [label, kind] = labels[plan.state] || ["已检查", "neutral"];
+  setBadge($("#repairState"), label, kind);
+  $("#repairTitle").textContent = plan.title || "修复方案";
+  $("#repairDetail").textContent = plan.detail || "暂无可执行动作。";
+  const code = $("#repairErrorCode");
+  code.textContent = plan.errorCode || "";
+  code.classList.toggle("hidden", !plan.errorCode);
+  const button = $("#repairActionButton");
+  button.classList.toggle("hidden", !plan.action);
+  button.disabled = state.repairing || !plan.action;
+  if (plan.action) {
+    button.querySelector("span:last-child").textContent = plan.action.label;
+    button.dataset.actionId = plan.action.id;
+  } else {
+    button.dataset.actionId = "";
+  }
+}
+
+function renderRepairPlanError(error) {
+  const panel = $("#repairPanel");
+  panel.className = "repair-panel manual-required";
+  setBadge($("#repairState"), "检查失败", "error");
+  $("#repairTitle").textContent = "暂时无法生成修复方案";
+  $("#repairDetail").textContent = friendlyError(error);
+  $("#repairErrorCode").classList.add("hidden");
+  $("#repairActionButton").classList.add("hidden");
+}
+
+async function runRecommendedRepair() {
+  const action = state.repairPlan?.action;
+  if (!tauri?.core || !action || state.repairing) return;
+  if (action.requiresConfirmation) {
+    const confirmed = await requestConfirmation({
+      title: `${action.label}？`,
+      message: action.description,
+      confirmLabel: action.label,
+    });
+    if (!confirmed) return;
+  }
+
+  const button = $("#repairActionButton");
+  const resultNode = $("#repairResult");
+  state.repairing = true;
+  button.disabled = true;
+  button.querySelector(".icon").innerHTML = ICONS.loader;
+  button.querySelector(".icon").classList.add("spin");
+  resultNode.className = "repair-result hidden";
+  resultNode.dataset.actionId = "";
+  resultNode.dataset.changed = "";
+  resultNode.dataset.beforeRouterState = "";
+  resultNode.dataset.afterRouterState = "";
+  try {
+    const result = await tauri.core.invoke("run_repair", {
+      request: {
+        actionId: action.id,
+        errorCode: state.repairPlan.errorCode || "",
+      },
+    });
+    state.formDirty = false;
+    await refreshStatus({ hydrateForm: true });
+    resultNode.textContent = result.changed
+      ? `修复完成，状态已更新：${result.summary}`
+      : `检查完成，系统状态未变化：${result.summary}`;
+    resultNode.dataset.actionId = result.actionId || "";
+    resultNode.dataset.changed = String(Boolean(result.changed));
+    resultNode.dataset.beforeRouterState = result.before?.routerState || "";
+    resultNode.dataset.afterRouterState = result.after?.routerState || "";
+    resultNode.className = "repair-result";
+    showToast(result.changed ? "修复已完成" : "检查已完成");
+  } catch (error) {
+    resultNode.textContent = friendlyError(error);
+    resultNode.className = "repair-result error";
+    showToast(friendlyError(error), true);
+    await refreshRepairPlan();
+  } finally {
+    state.repairing = false;
+    button.querySelector(".icon").classList.remove("spin");
+    button.querySelector(".icon").innerHTML = ICONS.refresh;
+    if (state.repairPlan) renderRepairPlan(state.repairPlan);
   }
 }
 
@@ -678,6 +842,8 @@ async function finishRun(payload) {
   if (state.finishedHandled) return;
   state.finishedHandled = true;
   state.running = false;
+  state.lastResultPayload = payload;
+  state.lastErrorEnvelope = payload.error || null;
   if (Array.isArray(payload.stages)) {
     payload.stages.forEach((stage) => {
       state.tasks[stage.stage] = normalizedStatus(stage.status);
@@ -686,7 +852,7 @@ async function finishRun(payload) {
   }
   renderTasks();
   setUiRunning(false);
-  if (payload.success) await refreshStatus({ hydrateForm: false });
+  await refreshStatus({ hydrateForm: false });
   showResult(payload);
 }
 
@@ -912,7 +1078,7 @@ async function restoreConfiguration() {
     confirmLabel: "恢复并重启",
   });
   if (!confirmed) return;
-  const buttons = [$("#restoreConfigButton"), $("#diagnosticRestoreButton")];
+  const buttons = [$("#restoreConfigButton")];
   buttons.forEach((button) => {
     button.disabled = true;
   });
@@ -936,7 +1102,7 @@ async function restoreConfiguration() {
 }
 
 async function disconnectRouter() {
-  if (!tauri?.core || !state.status?.configPresent || state.running || state.resetting) return;
+  if (!tauri?.core || !state.status?.configPresent || state.running || state.lifecycleRunning) return;
   const confirmed = await requestConfirmation({
     title: "断开本地 Router？",
     message: "将从 Codex 配置中移除助手写入的 Router 内容并重启 ChatGPT，恢复官方默认行为。已保存的 Router 地址、Key 和配置备份都会保留，可随时重新应用或恢复。",
@@ -966,75 +1132,153 @@ async function disconnectRouter() {
   }
 }
 
-async function factoryReset() {
-  if (!tauri?.core || state.running || state.installingApp || state.resetting) return;
-  const confirmed = await requestConfirmation({
-    title: "一键还原到初始状态？",
-    message: "将停止并卸载 ChatGPT，移除 Codex 配置，并删除助手的全部本地数据（含备份、主题和已保存的 Key）。此操作不可撤销。",
-    confirmLabel: "卸载并还原",
-    danger: true,
-  });
-  if (!confirmed) return;
-  state.resetting = true;
-  renderResetRunning();
+async function refreshLifecycleStatus() {
+  if (!tauri?.core || state.lifecycleRunning) return;
+  state.lifecycleStatus = null;
+  renderLifecycleStatusLoading();
   try {
-    const result = await tauri.core.invoke("factory_reset");
-    renderResetResult(result);
-    showToast(result.summary, !result.success);
+    const status = await tauri.core.invoke("get_lifecycle_status");
+    state.lifecycleStatus = status;
+    renderLifecycleStatus(status);
   } catch (error) {
-    renderResetResult({ success: false, summary: friendlyError(error), steps: [] });
-    showToast(friendlyError(error), true);
-  } finally {
-    state.resetting = false;
-    renderResetIdle();
-    state.formDirty = false;
-    refreshStatus({ hydrateForm: true });
+    state.lifecycleStatus = null;
+    renderLifecycleStatusError(error);
   }
 }
 
-function renderResetRunning() {
-  const button = $("#factoryResetButton");
-  button.disabled = true;
-  button.querySelector(".icon").innerHTML = ICONS.loader;
-  button.querySelector(".icon").classList.add("spin");
-  button.querySelector("span:last-child").textContent = "正在还原…";
-  $("#resetResult").classList.add("hidden");
-}
-
-function renderResetIdle() {
-  const button = $("#factoryResetButton");
-  button.disabled = false;
-  button.querySelector(".icon").innerHTML = ICONS.trash;
-  button.querySelector(".icon").classList.remove("spin");
-  button.querySelector("span:last-child").textContent = "一键还原";
-}
-
-function renderResetResult(result) {
-  const box = $("#resetResult");
-  box.replaceChildren();
-  (result.steps || []).forEach((step) => {
-    const row = document.createElement("div");
-    const icon = document.createElement("span");
-    icon.className = `icon ${step.status === "failed" ? "fail" : step.status === "skipped" ? "skip" : "ok"}`;
-    icon.innerHTML = step.status === "failed" ? ICONS.alert : step.status === "skipped" ? ICONS.circle : ICONS.check;
-    const message = document.createElement("span");
-    message.className = "msg";
-    message.textContent = `${step.label}：${step.message}`;
-    const stateLabel = document.createElement("strong");
-    stateLabel.className = step.status === "failed" ? "fail" : step.status === "skipped" ? "skip" : "ok";
-    stateLabel.textContent = { complete: "已完成", skipped: "已跳过", failed: "失败" }[step.status] || step.status;
-    row.append(icon, message, stateLabel);
-    box.append(row);
+function renderLifecycleStatusLoading() {
+  setBadge($("#lifecycleState"), "检查中", "pending");
+  $("#assistantUninstallDetail").textContent = "正在检查系统卸载入口。";
+  $("#managedConfigDetail").textContent = "正在检查助手管理的配置。";
+  $("#assistantDataDetail").textContent = "正在检查本地状态、备份、主题和 Key。";
+  $("#officialAppManagementDetail").textContent = "正在检查 ChatGPT 官方应用。";
+  [
+    "#uninstallAssistantButton",
+    "#restoreManagedConfigButton",
+    "#deleteAssistantDataButton",
+    "#openOfficialAppManagementButton",
+  ].forEach((selector) => {
+    $(selector).disabled = true;
   });
-  if (!(result.steps || []).length) {
-    const row = document.createElement("div");
-    const message = document.createElement("span");
-    message.className = "msg fail";
-    message.textContent = result.summary || "还原未完成";
-    row.append(message);
-    box.append(row);
+}
+
+function renderLifecycleStatus(status) {
+  setBadge($("#lifecycleState"), "边界已分离", "success");
+  const busy = Boolean(state.lifecycleRunning);
+
+  const uninstallButton = $("#uninstallAssistantButton");
+  uninstallButton.disabled = busy || !status.assistantUninstallAvailable;
+  $("#assistantUninstallDetail").textContent =
+    status.assistantUninstallMode === "nsis"
+      ? "系统卸载只移除助手程序，默认保留 ChatGPT、Codex 配置和助手数据。"
+      : status.assistantUninstallMode === "finder"
+        ? "助手会在 Finder 中定位应用；移到废纸篓不会删除 ChatGPT 或配置。"
+        : "当前不是完整安装版，请通过系统应用管理或重新安装后卸载。";
+
+  const configButton = $("#restoreManagedConfigButton");
+  configButton.disabled = busy || !status.managedConfigPresent;
+  $("#managedConfigDetail").textContent = status.managedConfigPresent
+    ? "检测到助手管理的 Router 配置；恢复时保留其他用户设置。"
+    : "没有助手管理的 Codex 配置，无需恢复。";
+
+  const dataButton = $("#deleteAssistantDataButton");
+  dataButton.disabled = busy || !status.assistantDataPresent || status.dataRemovalBlocked;
+  $("#assistantDataDetail").textContent = !status.assistantDataPresent
+    ? "没有助手运行数据。"
+    : status.dataRemovalBlocked
+      ? "当前仍被 Codex 配置使用，请先恢复原配置。"
+      : "可单独删除本地状态、备份、主题和保存的 Key。";
+
+  const officialButton = $("#openOfficialAppManagementButton");
+  officialButton.disabled = busy || !status.officialAppInstalled;
+  $("#officialAppManagementDetail").textContent = status.officialAppInstalled
+    ? `${status.officialAppTrusted ? "已检测到可信官方应用" : "已检测到应用但可信状态异常"}；卸载由操作系统再次确认。`
+    : "当前未检测到 ChatGPT；助手卸载不会改变此状态。";
+}
+
+function renderLifecycleStatusError(error) {
+  setBadge($("#lifecycleState"), "检查失败", "error");
+  $("#assistantUninstallDetail").textContent = friendlyError(error);
+  $("#managedConfigDetail").textContent = "未执行任何配置修改。";
+  $("#assistantDataDetail").textContent = "未执行任何数据删除。";
+  $("#officialAppManagementDetail").textContent = "未执行任何官方应用操作。";
+  [
+    "#uninstallAssistantButton",
+    "#restoreManagedConfigButton",
+    "#deleteAssistantDataButton",
+    "#openOfficialAppManagementButton",
+  ].forEach((selector) => {
+    $(selector).disabled = true;
+  });
+}
+
+async function runLifecycleAction(actionId) {
+  if (!tauri?.core || state.running || state.installingApp || state.lifecycleRunning) return;
+  const action = LIFECYCLE_ACTIONS[actionId];
+  if (!action) return;
+  if (action.title) {
+    const confirmed = await requestConfirmation({
+      title: action.title,
+      message: action.message,
+      confirmLabel: action.confirmLabel,
+      danger: action.danger,
+    });
+    if (!confirmed) return;
   }
-  box.classList.remove("hidden");
+
+  const buttons = {
+    uninstall_assistant: $("#uninstallAssistantButton"),
+    restore_pre_assistant_config: $("#restoreManagedConfigButton"),
+    delete_assistant_data: $("#deleteAssistantDataButton"),
+    open_official_app_management: $("#openOfficialAppManagementButton"),
+  };
+  const button = buttons[actionId];
+  const icon = button.querySelector(".icon");
+  const originalIcon = icon.innerHTML;
+  const resultNode = $("#lifecycleResult");
+  state.lifecycleRunning = actionId;
+  if (state.lifecycleStatus) renderLifecycleStatus(state.lifecycleStatus);
+  icon.innerHTML = ICONS.loader;
+  icon.classList.add("spin");
+  resultNode.className = "lifecycle-result hidden";
+  try {
+    const result = await tauri.core.invoke("run_lifecycle_action", {
+      request: {
+        actionId,
+        confirmation: action.confirmation,
+      },
+    });
+    resultNode.textContent = result.summary;
+    resultNode.dataset.actionId = result.actionId || "";
+    resultNode.dataset.status = result.status || "";
+    resultNode.dataset.changed = String(Boolean(result.changed));
+    resultNode.dataset.beforeManagedConfig = String(Boolean(result.before?.managedConfigPresent));
+    resultNode.dataset.afterManagedConfig = String(Boolean(result.after?.managedConfigPresent));
+    resultNode.dataset.beforeAssistantData = String(Boolean(result.before?.assistantDataPresent));
+    resultNode.dataset.afterAssistantData = String(Boolean(result.after?.assistantDataPresent));
+    resultNode.className = "lifecycle-result";
+    showToast(result.summary);
+    if (result.appExitRequested) {
+      await tauri.core.invoke("complete_assistant_uninstall_handoff");
+    } else {
+      state.lifecycleRunning = "";
+      state.formDirty = false;
+      await refreshStatus({ hydrateForm: true });
+      await refreshLifecycleStatus();
+    }
+  } catch (error) {
+    state.lastErrorEnvelope = errorEnvelope(error);
+    resultNode.textContent = friendlyError(error);
+    resultNode.className = "lifecycle-result error";
+    showToast(friendlyError(error), true);
+    state.lifecycleRunning = "";
+    await refreshLifecycleStatus();
+  } finally {
+    state.lifecycleRunning = "";
+    icon.classList.remove("spin");
+    icon.innerHTML = originalIcon;
+    if (state.lifecycleStatus) renderLifecycleStatus(state.lifecycleStatus);
+  }
 }
 
 async function refreshAppearanceStatus() {
@@ -1269,6 +1513,7 @@ async function applyAppearance() {
     $("#appearanceMessage").textContent = appearance.message;
     showToast("ChatGPT 外观已更新");
   } catch (error) {
+    state.lastErrorEnvelope = errorEnvelope(error);
     badge.textContent = "应用失败";
     badge.className = "status-badge error";
     $("#appearanceMessage").textContent = friendlyError(error);

@@ -262,6 +262,24 @@ fn classify_legacy_error(stage: &str, detail: &str) -> &'static str {
     if lower.contains("diagnostic_secret_detected") || lower.contains("诊断包检测到疑似密钥")
     {
         "DIAGNOSTIC_SECRET_DETECTED"
+    } else if stage == "repair_execute"
+        && (lower.contains("没有可安全执行") || lower.contains("not available"))
+    {
+        "REPAIR_NOT_AVAILABLE"
+    } else if stage == "repair_execute"
+        && (lower.contains("方案已随系统状态变化") || lower.contains("plan is stale"))
+    {
+        "REPAIR_PLAN_STALE"
+    } else if stage == "lifecycle_action" && lower.contains("动作 id 无效") {
+        "LIFECYCLE_ACTION_INVALID"
+    } else if stage == "lifecycle_action" && lower.contains("需要重新确认") {
+        "LIFECYCLE_CONFIRMATION_REQUIRED"
+    } else if stage == "lifecycle_action" && lower.contains("请先恢复原配置") {
+        "LIFECYCLE_DATA_IN_USE"
+    } else if stage == "lifecycle_action"
+        && (lower.contains("没有可信的助手卸载入口") || lower.contains("没有可定位的助手应用包"))
+    {
+        "ASSISTANT_UNINSTALLER_MISSING"
     } else if stage == "diagnostics_export" {
         "DIAGNOSTIC_EXPORT_FAILED"
     } else if stage.starts_with("appearance_") {
@@ -400,6 +418,14 @@ fn classify_legacy_error(stage: &str, detail: &str) -> &'static str {
         "SECRET_STORE_FAILED"
     } else if lower.contains("复核失败") || lower.contains("verify") {
         "CONFIG_VERIFY_FAILED"
+    } else if stage == "repair_plan" {
+        "REPAIR_PLAN_FAILED"
+    } else if stage == "repair_execute" {
+        "REPAIR_EXECUTION_FAILED"
+    } else if stage == "lifecycle_status" {
+        "LIFECYCLE_STATUS_FAILED"
+    } else if stage == "lifecycle_action" {
+        "LIFECYCLE_ACTION_FAILED"
     } else if stage == "install_chatgpt" {
         "APP_INSTALL_FAILED"
     } else {
@@ -612,6 +638,66 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
             "助手无法把诊断包写入系统下载目录，请检查磁盘空间和目录权限后重试。",
             true,
             "retry_diagnostics",
+        ),
+        "REPAIR_NOT_AVAILABLE" => (
+            "当前不需要执行这项修复",
+            "系统状态已经变化，请重新检查并使用最新建议。",
+            true,
+            "refresh_repair_plan",
+        ),
+        "REPAIR_PLAN_STALE" => (
+            "修复方案已更新",
+            "执行前复核发现系统状态已经变化，请重新检查后再继续。",
+            true,
+            "refresh_repair_plan",
+        ),
+        "REPAIR_PLAN_FAILED" => (
+            "暂时无法生成修复方案",
+            "助手无法完整读取当前状态，请重新检查或导出诊断包。",
+            true,
+            "retry_repair_plan",
+        ),
+        "REPAIR_EXECUTION_FAILED" => (
+            "修复未能完成",
+            "系统状态没有确认恢复，请重新检查并在仍失败时导出诊断包。",
+            true,
+            "retry_repair",
+        ),
+        "LIFECYCLE_ACTION_INVALID" => (
+            "无法识别这项应用与数据操作",
+            "操作请求无效，助手没有修改任何应用或数据。",
+            false,
+            "refresh_lifecycle_status",
+        ),
+        "LIFECYCLE_CONFIRMATION_REQUIRED" => (
+            "需要重新确认",
+            "该操作会修改配置、数据或助手安装，请阅读影响后再次确认。",
+            true,
+            "confirm_lifecycle_action",
+        ),
+        "LIFECYCLE_DATA_IN_USE" => (
+            "助手数据仍被 Codex 配置使用",
+            "请先恢复助手修改前的 Codex 配置，再删除助手运行数据。",
+            true,
+            "restore_pre_assistant_config",
+        ),
+        "ASSISTANT_UNINSTALLER_MISSING" => (
+            "未找到助手卸载入口",
+            "当前可能是开发版或安装不完整，请通过系统应用管理卸载或修复安装。",
+            true,
+            "open_system_apps",
+        ),
+        "LIFECYCLE_STATUS_FAILED" => (
+            "无法读取应用与数据状态",
+            "助手没有执行修改，请重新检查或导出诊断包。",
+            true,
+            "retry_lifecycle_status",
+        ),
+        "LIFECYCLE_ACTION_FAILED" => (
+            "应用与数据操作未完成",
+            "助手未确认目标状态，请重新检查并在仍失败时导出诊断包。",
+            true,
+            "retry_lifecycle_action",
         ),
         "APPEARANCE_UNSUPPORTED" => (
             "当前环境不支持主题功能",
@@ -1001,6 +1087,31 @@ mod tests {
             ErrorEnvelopeV1::from_legacy("diagnostics_export", "无法写入系统下载目录");
         assert_eq!(diagnostic_write.code, "DIAGNOSTIC_EXPORT_FAILED");
         assert_eq!(diagnostic_write.suggested_action, "retry_diagnostics");
+
+        let repair_stale =
+            ErrorEnvelopeV1::from_legacy("repair_execute", "修复方案已随系统状态变化");
+        assert_eq!(repair_stale.code, "REPAIR_PLAN_STALE");
+        assert_eq!(repair_stale.suggested_action, "refresh_repair_plan");
+
+        let repair_missing =
+            ErrorEnvelopeV1::from_legacy("repair_execute", "当前状态没有可安全执行的自动修复动作");
+        assert_eq!(repair_missing.code, "REPAIR_NOT_AVAILABLE");
+
+        let repair_plan = ErrorEnvelopeV1::from_legacy("repair_plan", "读取外观状态任务失败");
+        assert_eq!(repair_plan.code, "REPAIR_PLAN_FAILED");
+
+        let lifecycle_confirmation =
+            ErrorEnvelopeV1::from_legacy("lifecycle_action", "该生命周期操作需要重新确认");
+        assert_eq!(
+            lifecycle_confirmation.code,
+            "LIFECYCLE_CONFIRMATION_REQUIRED"
+        );
+
+        let lifecycle_dependency = ErrorEnvelopeV1::from_legacy(
+            "lifecycle_action",
+            "助手管理的 Codex 配置仍在使用本地数据，请先恢复原配置",
+        );
+        assert_eq!(lifecycle_dependency.code, "LIFECYCLE_DATA_IN_USE");
     }
 
     #[test]

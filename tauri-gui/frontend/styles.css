@@ -1802,6 +1802,81 @@ select:disabled {
   background: var(--surface);
 }
 
+.repair-panel {
+  display: flex;
+  min-height: 116px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.repair-panel.action-available {
+  border-color: #b8d6c7;
+  background: #fbfefc;
+}
+
+.repair-panel.manual-required {
+  border-color: #e6d2aa;
+  background: #fffdf8;
+}
+
+.repair-panel-copy {
+  min-width: 0;
+}
+
+.repair-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+}
+
+.repair-panel-heading code {
+  color: var(--text-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+
+.repair-panel h3,
+.repair-panel p {
+  margin: 0;
+}
+
+.repair-panel h3 {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.repair-panel p {
+  max-width: 660px;
+  margin-top: 5px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.repair-panel > button {
+  flex: 0 0 auto;
+}
+
+.repair-result {
+  margin-top: 10px;
+  color: var(--success);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.repair-result.error {
+  color: var(--danger);
+}
+
 .diagnostic-list > div {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr);
@@ -1842,38 +1917,87 @@ select:disabled {
   gap: 12px;
 }
 
-.danger-zone {
-  margin-top: 6px;
-  padding: 16px 18px;
-  border: 1px solid #efc0c4;
-  border-radius: 8px;
-  background: #fffafa;
+@media (max-width: 720px) {
+  .repair-panel {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .repair-panel > button {
+    align-self: flex-start;
+  }
 }
 
-.danger-zone-head {
+.lifecycle-panel {
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.lifecycle-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
 }
 
-.danger-zone h2,
-.danger-zone p {
+.lifecycle-panel h2,
+.lifecycle-panel h3,
+.lifecycle-panel p {
   margin: 0;
 }
 
-.danger-zone h2 {
-  color: var(--danger);
+.lifecycle-panel h2 {
+  color: var(--text);
   font-size: 14px;
   font-weight: 680;
 }
 
-.danger-zone p {
-  max-width: 560px;
+.lifecycle-panel-head p {
+  max-width: 620px;
   margin-top: 6px;
   color: var(--text-soft);
   font-size: 11px;
   line-height: 1.5;
+}
+
+.lifecycle-list {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.lifecycle-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 148px;
+  min-height: 72px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lifecycle-row h3 {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.lifecycle-row p {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.lifecycle-row > button {
+  width: 148px;
+  justify-self: end;
+}
+
+.lifecycle-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
 }
 
 .secondary-button.danger {
@@ -1898,55 +2022,32 @@ select:disabled {
   background: #932029;
 }
 
-.reset-result {
-  margin-top: 14px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-}
-
-.reset-result > div {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  min-height: 36px;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-}
-
-.reset-result > div:last-child {
-  border-bottom: 0;
-}
-
-.reset-result .icon {
-  width: 15px;
-  height: 15px;
-}
-
-.reset-result .msg {
-  min-width: 0;
-  color: var(--text-soft);
-  line-height: 1.45;
-}
-
-.reset-result strong {
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.reset-result .ok {
+.lifecycle-result {
+  margin-top: 12px;
   color: var(--success);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
-.reset-result .skip {
-  color: var(--text-muted);
-}
-
-.reset-result .fail {
+.lifecycle-result.error {
   color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .lifecycle-panel-head {
+    align-items: flex-start;
+  }
+
+  .lifecycle-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+    padding: 14px 0;
+  }
+
+  .lifecycle-row > button {
+    width: auto;
+    justify-self: start;
+    grid-column: 2;
+  }
 }
 
 .advanced-entry {

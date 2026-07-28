@@ -469,6 +469,33 @@ if ($ExpectSetupFailure) {
       $statusAfterFailure.ready) {
     throw "SystemStatusV1 retained stale readiness after a failed Responses probe: $($statusAfterFailure | ConvertTo-Json -Compress)"
   }
+  $repairAfterFailure = Invoke-CdpExpression $socket @'
+(async () => {
+  const plan = await window.__TAURI__.core.invoke('get_repair_plan', {
+    request: { errorCode: 'ROUTER_RESPONSES_UNSUPPORTED' }
+  });
+  document.querySelector('[data-view="diagnostics"]').click();
+  const deadline = Date.now() + 10000;
+  const button = document.querySelector('#repairActionButton');
+  while (button.classList.contains('hidden') && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return {
+    planState: plan.state,
+    actionId: plan.action?.id || '',
+    buttonVisible: !button.classList.contains('hidden'),
+    buttonActionId: button.dataset.actionId || '',
+    fixedRestoreAbsent: !document.querySelector('#diagnosticRestoreButton')
+  };
+})()
+'@ 23
+  if ($repairAfterFailure.planState -ne "action_available" -or
+      $repairAfterFailure.actionId -ne "revalidate_router" -or
+      !$repairAfterFailure.buttonVisible -or
+      $repairAfterFailure.buttonActionId -ne "revalidate_router" -or
+      !$repairAfterFailure.fixedRestoreAbsent) {
+    throw "Router failure did not produce one targeted repair action: $($repairAfterFailure | ConvertTo-Json -Compress)"
+  }
   $socket.Dispose()
   [pscustomobject]@{
     success = $true
@@ -480,6 +507,7 @@ if ($ExpectSetupFailure) {
     failedMessage = $result.failedMessage
     configUnchanged = $true
     evidenceInvalidated = $true
+    targetedRepair = $repairAfterFailure
     systemStatus = $statusAfterFailure
     chatGptProcessCountDuringSetup = $chatGptAfter
   } | ConvertTo-Json -Depth 5 -Compress
@@ -503,12 +531,57 @@ $backupUiVisible = Invoke-CdpExpression $socket @'
   while (refresh.disabled && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
   return {
     home: !document.querySelector('#restoreConfigButton').classList.contains('hidden'),
-    diagnostics: !document.querySelector('#diagnosticRestoreButton').disabled
+    targetedRepairPanel: Boolean(document.querySelector('#repairPanel')),
+    fixedDiagnosticRestoreAbsent: !document.querySelector('#diagnosticRestoreButton')
   };
 })()
 '@ 6
-if ($hadConfigBefore -and (!$backupUiVisible.home -or !$backupUiVisible.diagnostics)) {
-  throw "Configuration backup was written but the restore actions are not available in the UI"
+if ($hadConfigBefore -and !$backupUiVisible.home) {
+  throw "Configuration backup was written but the reversible home action is unavailable"
+}
+if (!$backupUiVisible.targetedRepairPanel -or !$backupUiVisible.fixedDiagnosticRestoreAbsent) {
+  throw "Diagnostics does not use the targeted repair panel"
+}
+
+$lifecycleUi = Invoke-CdpExpression $socket @'
+(async () => {
+  const status = await window.__TAURI__.core.invoke('get_lifecycle_status');
+  document.querySelector('[data-view="diagnostics"]').click();
+  const deadline = Date.now() + 10000;
+  const uninstall = document.querySelector('#uninstallAssistantButton');
+  const restore = document.querySelector('#restoreManagedConfigButton');
+  const deleteData = document.querySelector('#deleteAssistantDataButton');
+  while (
+    (uninstall.disabled || restore.disabled || !deleteData.disabled) &&
+    Date.now() < deadline
+  ) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return {
+    status,
+    oldFactoryResetAbsent: !document.querySelector('#factoryResetButton'),
+    uninstallEnabled: !uninstall.disabled,
+    restoreConfigEnabled: !restore.disabled,
+    deleteDataBlocked: deleteData.disabled,
+    officialManagementEnabled: !document.querySelector('#openOfficialAppManagementButton').disabled
+  };
+})()
+'@ 24
+if (!$lifecycleUi.status.defaultPreservesConfig -or
+    !$lifecycleUi.status.defaultPreservesData -or
+    !$lifecycleUi.status.defaultPreservesOfficialApp -or
+    !$lifecycleUi.status.assistantUninstallAvailable -or
+    !$lifecycleUi.status.managedConfigPresent -or
+    !$lifecycleUi.status.assistantDataPresent -or
+    !$lifecycleUi.status.dataRemovalBlocked -or
+    !$lifecycleUi.status.officialAppInstalled -or
+    !$lifecycleUi.status.officialAppTrusted -or
+    !$lifecycleUi.oldFactoryResetAbsent -or
+    !$lifecycleUi.uninstallEnabled -or
+    !$lifecycleUi.restoreConfigEnabled -or
+    !$lifecycleUi.deleteDataBlocked -or
+    !$lifecycleUi.officialManagementEnabled) {
+  throw "Lifecycle boundaries are not represented by real status and independent controls: $($lifecycleUi | ConvertTo-Json -Depth 6 -Compress)"
 }
 
 if (!(Test-Path $configPath)) { throw "Codex config was not written" }
@@ -904,7 +977,14 @@ $socket.Dispose()
   localOllamaDiagnostic = $connection.localOllamaDiagnostic
   chatGptProcessCountDuringSetup = $chatGptAfter
   chatGptLaunchedAfterExplicitAction = $chatGptLaunched
-  backupAvailableInUi = [bool]($backupUiVisible.home -and $backupUiVisible.diagnostics)
+  backupAvailableInUi = [bool]$backupUiVisible.home
+  targetedRepairPanel = [bool]($backupUiVisible.targetedRepairPanel -and $backupUiVisible.fixedDiagnosticRestoreAbsent)
+  lifecycleBoundaries = [bool](
+    $lifecycleUi.status.defaultPreservesConfig -and
+    $lifecycleUi.status.defaultPreservesData -and
+    $lifecycleUi.status.defaultPreservesOfficialApp -and
+    $lifecycleUi.oldFactoryResetAbsent
+  )
   diagnosticSupportId = $diagnosticBundle.supportId
   diagnosticBundleSha256 = $diagnosticBundle.sha256
   diagnosticUiDownloadSha256 = $diagnosticUiDownloadSha256
