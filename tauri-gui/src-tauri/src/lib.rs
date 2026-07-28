@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{
     env, fs,
     io::{BufRead, BufReader},
@@ -10,7 +11,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
@@ -18,7 +18,13 @@ use url::Url;
 
 use std::io::{Cursor, Read};
 
+mod contracts;
 mod token_support;
+
+use contracts::{
+    new_operation_id, ErrorEnvelopeV1, SetupStageV1, StageEventV1, StageStatusV1,
+    SystemStatusInput, SystemStatusV1, SCHEMA_VERSION_V1,
+};
 
 const VERSION: &str = "0.8.8";
 const CONFIG_START: &str = "# >>> CodexAssistant Managed Config";
@@ -78,26 +84,6 @@ struct ModelDiscovery {
     models: Vec<String>,
     used_saved_key: bool,
     message: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SystemStatus {
-    platform: String,
-    architecture: String,
-    app_installed: bool,
-    app_name: String,
-    app_version: Option<String>,
-    app_detail: String,
-    config_present: bool,
-    config_path: String,
-    router_reachable: bool,
-    router_detail: String,
-    configured_gateway: Option<String>,
-    configured_model: Option<String>,
-    key_configured: bool,
-    backup_available: bool,
-    ready: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -379,24 +365,15 @@ static ART_PRESETS: &[ArtPreset] = &[
 ];
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct InstallerFinished {
+    schema_version: u8,
+    operation_id: String,
     success: bool,
     code: Option<i32>,
     summary: String,
-    stages: Vec<StageEvent>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StageEvent {
-    stage: String,
-    label: String,
-    status: String,
-    message: String,
-    current: usize,
-    total: usize,
-    recoverable: bool,
-    details: serde_json::Value,
+    stages: Vec<StageEventV1>,
+    error: Option<ErrorEnvelopeV1>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -471,7 +448,7 @@ struct InstallContext {
 
 #[derive(Clone, Debug)]
 struct StageOutcome {
-    status: &'static str,
+    status: StageStatusV1,
     message: String,
     details: serde_json::Value,
 }
@@ -479,7 +456,7 @@ struct StageOutcome {
 impl StageOutcome {
     fn complete(message: impl Into<String>) -> Self {
         Self {
-            status: "complete",
+            status: StageStatusV1::Complete,
             message: message.into(),
             details: json!({}),
         }
@@ -487,7 +464,7 @@ impl StageOutcome {
 
     fn skipped(message: impl Into<String>) -> Self {
         Self {
-            status: "skipped",
+            status: StageStatusV1::Skipped,
             message: message.into(),
             details: json!({}),
         }
@@ -506,98 +483,140 @@ fn default_true() -> bool {
 }
 
 #[tauri::command]
-async fn get_system_status() -> Result<SystemStatus, String> {
+async fn get_system_status() -> Result<SystemStatusV1, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(collect_system_status)
         .await
-        .map_err(|error| format!("读取状态失败: {error}"))?
+        .map_err(|error| command_error("system_status", format!("读取状态失败: {error}")))?
+        .map_err(|error| command_error("system_status", error))
 }
 
 #[tauri::command]
-async fn discover_models(request: GatewayProbeRequest) -> Result<ModelDiscovery, String> {
+async fn discover_models(request: GatewayProbeRequest) -> Result<ModelDiscovery, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(move || discover_models_inner(request))
         .await
-        .map_err(|error| format!("模型检测任务失败: {error}"))?
+        .map_err(|error| {
+            command_error(
+                "validate_router_models",
+                format!("模型检测任务失败: {error}"),
+            )
+        })?
+        .map_err(|error| command_error("validate_router_models", error))
 }
 
 #[tauri::command]
-async fn start_setup(app: AppHandle, options: SetupOptions) -> Result<InstallerFinished, String> {
-    let options = resolve_options(options)?;
+async fn start_setup(
+    app: AppHandle,
+    options: SetupOptions,
+) -> Result<InstallerFinished, ErrorEnvelopeV1> {
+    let options = resolve_options(options).map_err(|error| command_error("preflight", error))?;
     tauri::async_runtime::spawn_blocking(move || run_setup(app, options))
         .await
-        .map_err(|error| format!("配置任务失败: {error}"))
+        .map_err(|error| command_error("setup", format!("配置任务失败: {error}")))
 }
 
 #[tauri::command]
-async fn install_chatgpt_app(app: AppHandle) -> Result<SystemStatus, String> {
+async fn install_chatgpt_app(app: AppHandle) -> Result<SystemStatusV1, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(move || install_chatgpt_app_inner(&app))
         .await
-        .map_err(|error| format!("安装任务失败: {error}"))?
+        .map_err(|error| command_error("install_chatgpt", format!("安装任务失败: {error}")))?
+        .map_err(|error| command_error("install_chatgpt", error))
 }
 
 #[tauri::command]
-async fn launch_chatgpt() -> Result<(), String> {
+async fn launch_chatgpt() -> Result<(), ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(launch_chatgpt_preferred)
         .await
-        .map_err(|error| format!("启动任务失败: {error}"))?
+        .map_err(|error| command_error("launch_chatgpt", format!("启动任务失败: {error}")))?
+        .map_err(|error| command_error("launch_chatgpt", error))
 }
 
 #[tauri::command]
-async fn restart_chatgpt() -> Result<(), String> {
+async fn restart_chatgpt() -> Result<(), ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(restart_chatgpt_inner)
         .await
-        .map_err(|error| format!("重启任务失败: {error}"))?
+        .map_err(|error| command_error("restart_chatgpt", format!("重启任务失败: {error}")))?
+        .map_err(|error| command_error("restart_chatgpt", error))
 }
 
 #[tauri::command]
-async fn restore_codex_config() -> Result<RestoreResult, String> {
+async fn restore_codex_config() -> Result<RestoreResult, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(restore_codex_config_inner)
         .await
-        .map_err(|error| format!("恢复任务失败: {error}"))?
+        .map_err(|error| command_error("rollback", format!("恢复任务失败: {error}")))?
+        .map_err(|error| command_error("rollback", error))
 }
 
 #[tauri::command]
-async fn factory_reset() -> Result<FactoryResetResult, String> {
+async fn factory_reset() -> Result<FactoryResetResult, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(factory_reset_inner)
         .await
-        .map_err(|error| format!("还原任务失败: {error}"))?
+        .map_err(|error| command_error("factory_reset", format!("还原任务失败: {error}")))?
+        .map_err(|error| command_error("factory_reset", error))
 }
 
 #[tauri::command]
-async fn get_appearance_status() -> Result<AppearanceStatus, String> {
+async fn get_appearance_status() -> Result<AppearanceStatus, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(collect_appearance_status)
         .await
-        .map_err(|error| format!("读取外观状态失败: {error}"))?
+        .map_err(|error| {
+            command_error(
+                "appearance_status",
+                format!("读取外观状态任务失败: {error}"),
+            )
+        })?
+        .map_err(|error| command_error("appearance_status", error))
 }
 
 #[tauri::command]
-async fn apply_appearance(theme: String) -> Result<AppearanceStatus, String> {
+async fn apply_appearance(theme: String) -> Result<AppearanceStatus, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(move || apply_appearance_inner(&theme))
         .await
-        .map_err(|error| format!("应用外观任务失败: {error}"))?
+        .map_err(|error| command_error("appearance_apply", format!("应用外观任务失败: {error}")))?
+        .map_err(|error| command_error("appearance_apply", error))
 }
 
 #[tauri::command]
-async fn import_theme_image(request: ThemeImageRequest) -> Result<AppearanceStatus, String> {
+async fn import_theme_image(
+    request: ThemeImageRequest,
+) -> Result<AppearanceStatus, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(move || import_theme_image_inner(&request))
         .await
-        .map_err(|error| format!("导入主题图片任务失败: {error}"))?
+        .map_err(|error| {
+            command_error(
+                "appearance_import",
+                format!("导入主题图片任务失败: {error}"),
+            )
+        })?
+        .map_err(|error| command_error("appearance_import", error))
 }
 
 #[tauri::command]
-async fn list_preset_themes() -> Result<Vec<PresetThemeInfo>, String> {
+async fn list_preset_themes() -> Result<Vec<PresetThemeInfo>, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(list_preset_themes_inner)
         .await
-        .map_err(|error| format!("读取内置主题任务失败: {error}"))?
+        .map_err(|error| {
+            command_error(
+                "appearance_presets",
+                format!("读取内置主题任务失败: {error}"),
+            )
+        })?
+        .map_err(|error| command_error("appearance_presets", error))
 }
 
 #[tauri::command]
-async fn list_gallery_themes() -> Result<Vec<GalleryThemeInfo>, String> {
+async fn list_gallery_themes() -> Result<Vec<GalleryThemeInfo>, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(list_gallery_themes_inner)
         .await
-        .map_err(|error| format!("读取在线主题库任务失败: {error}"))?
+        .map_err(|error| {
+            command_error(
+                "appearance_gallery",
+                format!("读取在线主题库任务失败: {error}"),
+            )
+        })?
+        .map_err(|error| command_error("appearance_gallery", error))
 }
 
-fn collect_system_status() -> Result<SystemStatus, String> {
+fn collect_system_status() -> Result<SystemStatusV1, String> {
     let paths = resolve_paths()?;
     let app = detect_chatgpt_app()?;
     let state = read_state(&paths).ok();
@@ -617,8 +636,7 @@ fn collect_system_status() -> Result<SystemStatus, String> {
     };
 
     let backup_available = latest_configuration_snapshot(&paths)?.is_some();
-    let ready = app.installed && config_present && router_reachable;
-    Ok(SystemStatus {
+    Ok(SystemStatusV1::from_input(SystemStatusInput {
         platform: platform_name().to_string(),
         architecture: std::env::consts::ARCH.to_string(),
         app_installed: app.installed,
@@ -636,8 +654,7 @@ fn collect_system_status() -> Result<SystemStatus, String> {
             .map(|saved| saved.token_mode != "none")
             .unwrap_or(false),
         backup_available,
-        ready,
-    })
+    }))
 }
 
 fn discover_models_inner(request: GatewayProbeRequest) -> Result<ModelDiscovery, String> {
@@ -668,12 +685,21 @@ fn discover_models_inner(request: GatewayProbeRequest) -> Result<ModelDiscovery,
 }
 
 fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
-    let stages: [(&str, &str, StageRunner); 5] = [
-        ("preflight", "检查本机环境", preflight_setup),
-        ("install_chatgpt", "准备 ChatGPT", install_chatgpt),
-        ("validate_router", "验证 Router", validate_router),
-        ("configure_codex", "写入 Codex 配置", configure_provider),
-        ("verify", "复核配置", verify_setup),
+    let operation_id = new_operation_id();
+    let stages: [(SetupStageV1, &str, StageRunner); 5] = [
+        (SetupStageV1::Preflight, "检查本机环境", preflight_setup),
+        (
+            SetupStageV1::InstallChatgpt,
+            "准备 ChatGPT",
+            install_chatgpt,
+        ),
+        (SetupStageV1::ValidateRouter, "验证 Router", validate_router),
+        (
+            SetupStageV1::ConfigureCodex,
+            "写入 Codex 配置",
+            configure_provider,
+        ),
+        (SetupStageV1::Verify, "复核配置", verify_setup),
     ];
     let mut ctx = InstallContext {
         options,
@@ -682,61 +708,65 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
     let mut results = Vec::new();
     let mut success = true;
     let mut summary = "ChatGPT 与 Codex Router 已配置完成".to_string();
+    let mut failure = None;
 
     for (index, (stage, label, runner)) in stages.iter().enumerate() {
-        emit_stage(
-            &app,
-            stage,
-            label,
-            "running",
+        let running = StageEventV1::running(
+            &operation_id,
+            *stage,
+            *label,
             format!("正在{label}"),
             index + 1,
             stages.len(),
             false,
             json!({}),
         );
+        emit_stage_event(&app, &running);
         emit_log(&app, format!("[{}/{}] {label}\n", index + 1, stages.len()));
         match runner(&app, &mut ctx) {
             Ok(outcome) => {
-                let event = stage_event(
-                    *stage,
-                    *label,
-                    outcome.status,
-                    outcome.message,
-                    index + 1,
-                    stages.len(),
-                    false,
-                    outcome.details,
-                );
+                let event = running
+                    .transition(
+                        outcome.status,
+                        outcome.message,
+                        false,
+                        false,
+                        outcome.details,
+                    )
+                    .expect("running setup stage must transition to a terminal status");
                 emit_stage_event(&app, &event);
                 results.push(event);
             }
             Err(error) => {
                 emit_log(&app, format!("[FAIL] {}\n", redact_error(&error)));
-                let event = stage_event(
-                    *stage,
-                    *label,
-                    "failed",
-                    friendly_error(&error),
-                    index + 1,
-                    stages.len(),
-                    true,
-                    json!({ "error": friendly_error(&error) }),
-                );
+                let envelope = command_error(setup_error_stage(*stage), error);
+                let event = running
+                    .transition(
+                        StageStatusV1::Failed,
+                        envelope.message.clone(),
+                        false,
+                        envelope.recoverable,
+                        json!({ "error": envelope.clone() }),
+                    )
+                    .expect("running setup stage must transition to failed");
                 emit_stage_event(&app, &event);
                 results.push(event);
                 success = false;
-                summary = format!("{label}失败");
+                summary = envelope.title.clone();
+                failure = Some(envelope);
                 break;
             }
         }
     }
 
     let finished = InstallerFinished {
+        schema_version: SCHEMA_VERSION_V1,
+        operation_id,
         success,
         code: Some(if success { 0 } else { 1 }),
         summary,
         stages: results,
+        error: failure,
     };
     let _ = app.emit("installer-finished", finished.clone());
     finished
@@ -781,7 +811,7 @@ fn preflight_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
     Ok(StageOutcome::complete("环境检查通过"))
 }
 
-fn install_chatgpt_app_inner(app: &AppHandle) -> Result<SystemStatus, String> {
+fn install_chatgpt_app_inner(app: &AppHandle) -> Result<SystemStatusV1, String> {
     if detect_chatgpt_app()?.installed {
         return collect_system_status();
     }
@@ -1428,7 +1458,9 @@ fn factory_reset_inner() -> Result<FactoryResetResult, String> {
 
 fn assistant_data_root(paths: &InstallerPaths) -> PathBuf {
     match paths.install_root.parent() {
-        Some(parent) if parent.file_name().and_then(|name| name.to_str()) == Some("CodexAssistant") => {
+        Some(parent)
+            if parent.file_name().and_then(|name| name.to_str()) == Some("CodexAssistant") =>
+        {
             parent.to_path_buf()
         }
         _ => paths.install_root.clone(),
@@ -1506,15 +1538,21 @@ fn uninstall_chatgpt() -> Result<(), String> {
     Err("当前平台请手动卸载 ChatGPT".to_string())
 }
 
+#[cfg(target_os = "windows")]
 fn wait_for_chatgpt_removed(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if detect_chatgpt_app().map(|app| !app.installed).unwrap_or(true) {
+        if detect_chatgpt_app()
+            .map(|app| !app.installed)
+            .unwrap_or(true)
+        {
             return true;
         }
         thread::sleep(Duration::from_secs(2));
     }
-    detect_chatgpt_app().map(|app| !app.installed).unwrap_or(true)
+    detect_chatgpt_app()
+        .map(|app| !app.installed)
+        .unwrap_or(true)
 }
 
 fn collect_appearance_status() -> Result<AppearanceStatus, String> {
@@ -1563,7 +1601,10 @@ fn apply_appearance_inner(theme: &str) -> Result<AppearanceStatus, String> {
     apply_appearance_with_download(theme, true)
 }
 
-fn apply_appearance_with_download(theme: &str, allow_download: bool) -> Result<AppearanceStatus, String> {
+fn apply_appearance_with_download(
+    theme: &str,
+    allow_download: bool,
+) -> Result<AppearanceStatus, String> {
     if !matches!(theme, "official" | "focus" | "custom") && !is_art_theme(theme) {
         return Err("不支持的主题".to_string());
     }
@@ -1780,7 +1821,11 @@ fn is_art_theme(theme: &str) -> bool {
     theme.starts_with("preset:") || theme.starts_with("gallery:")
 }
 
-fn prepare_theme(paths: &InstallerPaths, theme: &str, allow_download: bool) -> Result<PreparedTheme, String> {
+fn prepare_theme(
+    paths: &InstallerPaths,
+    theme: &str,
+    allow_download: bool,
+) -> Result<PreparedTheme, String> {
     match theme {
         "focus" => Ok(PreparedTheme {
             attr: "focus".to_string(),
@@ -1847,9 +1892,10 @@ fn resolve_art_theme(
         }
         let meta_data = fs::read_to_string(directory.join("meta.json"))
             .map_err(|_| "主题信息缺失，请重新下载该主题".to_string())?;
-        let meta: ArtThemeMeta =
-            serde_json::from_str(&meta_data).map_err(|_| "主题信息已损坏，请重新下载".to_string())?;
-        if !meta.stored_file.starts_with("background.") || !is_safe_package_token(&meta.stored_file, 64)
+        let meta: ArtThemeMeta = serde_json::from_str(&meta_data)
+            .map_err(|_| "主题信息已损坏，请重新下载".to_string())?;
+        if !meta.stored_file.starts_with("background.")
+            || !is_safe_package_token(&meta.stored_file, 64)
         {
             return Err("主题背景文件名不安全".to_string());
         }
@@ -1929,9 +1975,7 @@ fn gallery_http_agent() -> ureq::Agent {
 fn list_gallery_themes_inner() -> Result<Vec<GalleryThemeInfo>, String> {
     let paths = resolve_paths()?;
     let agent = gallery_http_agent();
-    let url = format!(
-        "{GALLERY_API_BASE}/v1/themes?sort=popular&limit={GALLERY_LIST_LIMIT}"
-    );
+    let url = format!("{GALLERY_API_BASE}/v1/themes?sort=popular&limit={GALLERY_LIST_LIMIT}");
     let response = agent
         .get(&url)
         .call()
@@ -2007,11 +2051,13 @@ fn download_gallery_theme(paths: &InstallerPaths, version_id: &str) -> Result<()
     validate_gallery_version_id(version_id)?;
     let agent = gallery_http_agent();
     let detail_url = format!("{GALLERY_API_BASE}/v1/themes/{version_id}");
-    let detail: serde_json::Value = agent
+    let response = agent
         .get(&detail_url)
         .call()
-        .and_then(|response| response.into_json().map_err(ureq::Error::from))
         .map_err(|error| format!("获取主题信息失败: {error}"))?;
+    let detail: serde_json::Value = response
+        .into_json()
+        .map_err(|error| format!("解析主题信息失败: {error}"))?;
     let expected_sha = detail
         .get("packageSha256")
         .and_then(|value| value.as_str())
@@ -2042,7 +2088,10 @@ fn download_gallery_theme(paths: &InstallerPaths, version_id: &str) -> Result<()
     }
     if let Some(expected) = expected_sha {
         let digest = Sha256::digest(&package);
-        let actual = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        let actual = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         if actual != expected {
             return Err("主题包校验和不一致，已中止".to_string());
         }
@@ -2061,7 +2110,6 @@ fn download_gallery_theme(paths: &InstallerPaths, version_id: &str) -> Result<()
             .map_err(|error| format!("读取主题包条目失败: {error}"))?;
         let enclosed = entry
             .enclosed_name()
-            .map(PathBuf::from)
             .ok_or_else(|| "主题包包含不安全路径".to_string())?;
         let depth = enclosed.components().count();
         if depth > 2 {
@@ -2233,7 +2281,11 @@ fn parse_hex_rgb(color: &str) -> Option<(u8, u8, u8)> {
             }
             Some((channels[0], channels[1], channels[2]))
         }
-        6 | 8 => Some((expand(&hex[0..2])?, expand(&hex[2..4])?, expand(&hex[4..6])?)),
+        6 | 8 => Some((
+            expand(&hex[0..2])?,
+            expand(&hex[2..4])?,
+            expand(&hex[4..6])?,
+        )),
         _ => None,
     }
 }
@@ -2288,8 +2340,16 @@ fn render_art_css(attr: &str, meta: &ArtThemeMeta) -> String {
     let background = css_color(&colors.background, "#0b1118");
     let text = css_color(&colors.text, "#f4f7fb");
     let text_soft = color_with_alpha(&colors.text, 0.9, "rgba(244, 247, 251, .90)");
-    let panel_a1 = color_with_alpha(&colors.panel, if dark { 0.76 } else { 0.88 }, "rgba(8, 14, 22, .76)");
-    let panel_a2 = color_with_alpha(&colors.panel, if dark { 0.46 } else { 0.62 }, "rgba(8, 14, 22, .46)");
+    let panel_a1 = color_with_alpha(
+        &colors.panel,
+        if dark { 0.76 } else { 0.88 },
+        "rgba(8, 14, 22, .76)",
+    );
+    let panel_a2 = color_with_alpha(
+        &colors.panel,
+        if dark { 0.46 } else { 0.62 },
+        "rgba(8, 14, 22, .46)",
+    );
     let panel_bar = color_with_alpha(&colors.panel, 0.78, "rgba(15, 23, 33, .78)");
     let composer_bg = color_with_alpha(&colors.panel_alt, 0.84, "rgba(15, 23, 33, .84)");
     let line_soft = color_with_alpha(&colors.line, 0.5, "rgba(255, 255, 255, .14)");
@@ -3569,6 +3629,17 @@ fn friendly_error(error: &str) -> String {
     redact_error(error).replace("Transport(Transport", "连接错误(")
 }
 
+fn command_error(stage: impl Into<String>, error: impl AsRef<str>) -> ErrorEnvelopeV1 {
+    ErrorEnvelopeV1::from_legacy(stage, friendly_error(error.as_ref()))
+}
+
+fn setup_error_stage(stage: SetupStageV1) -> &'static str {
+    match stage {
+        SetupStageV1::ValidateRouter => "validate_router_models",
+        _ => stage.as_str(),
+    }
+}
+
 fn redact_error(value: &str) -> String {
     let mut output = value.to_string();
     for marker in ["Bearer ", "token=", "key="] {
@@ -3594,57 +3665,7 @@ fn emit_log(app: &AppHandle, line: impl Into<String>) {
     let _ = app.emit("installer-log", line.into());
 }
 
-#[allow(clippy::too_many_arguments)]
-fn emit_stage(
-    app: &AppHandle,
-    stage: &str,
-    label: &str,
-    status: &str,
-    message: impl Into<String>,
-    current: usize,
-    total: usize,
-    recoverable: bool,
-    details: serde_json::Value,
-) {
-    emit_stage_event(
-        app,
-        &stage_event(
-            stage,
-            label,
-            status,
-            message,
-            current,
-            total,
-            recoverable,
-            details,
-        ),
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn stage_event(
-    stage: impl Into<String>,
-    label: impl Into<String>,
-    status: impl Into<String>,
-    message: impl Into<String>,
-    current: usize,
-    total: usize,
-    recoverable: bool,
-    details: serde_json::Value,
-) -> StageEvent {
-    StageEvent {
-        stage: stage.into(),
-        label: label.into(),
-        status: status.into(),
-        message: message.into(),
-        current,
-        total,
-        recoverable,
-        details,
-    }
-}
-
-fn emit_stage_event(app: &AppHandle, event: &StageEvent) {
+fn emit_stage_event(app: &AppHandle, event: &StageEventV1) {
     let _ = app.emit("installer-stage", event.clone());
 }
 
@@ -3674,6 +3695,55 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Codex Assistant app");
+}
+
+#[cfg(windows)]
+pub fn ensure_single_instance_before_tauri() -> bool {
+    use std::{os::windows::ffi::OsStrExt, ptr, thread, time::Duration};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS},
+        System::Threading::CreateMutexW,
+        UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE},
+    };
+
+    fn wide(value: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(value)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    let mutex_name = wide(r"Local\cn.523tech.codex.assistant.preflight");
+    let handle = unsafe { CreateMutexW(ptr::null(), 1, mutex_name.as_ptr()) };
+    if handle.is_null() {
+        return true;
+    }
+    if unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+        // The operating system owns the raw handle until this process exits.
+        return true;
+    }
+
+    unsafe {
+        CloseHandle(handle);
+    }
+    let window_title = wide("Codex 助手");
+    for _ in 0..40 {
+        let window = unsafe { FindWindowW(ptr::null(), window_title.as_ptr()) };
+        if !window.is_null() {
+            unsafe {
+                ShowWindow(window, SW_RESTORE);
+                SetForegroundWindow(window);
+            }
+            break;
+        }
+        thread::sleep(Duration::from_millis(125));
+    }
+    false
+}
+
+#[cfg(not(windows))]
+pub fn ensure_single_instance_before_tauri() -> bool {
+    true
 }
 
 pub fn try_run_token_helper_from_args() -> Option<i32> {

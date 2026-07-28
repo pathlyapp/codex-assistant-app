@@ -1,0 +1,71 @@
+name: SPEC work package
+description: Track a Codex Assistant requirement or milestone work package.
+title: "[SPEC-ID] "
+labels:
+  - enhancement
+body:
+  - type: input
+    id: requirement_ids
+    attributes:
+      label: Requirement IDs
+      description: Use stable IDs from the external SPEC, separated by commas.
+      placeholder: UX-010, REL-032
+    validations:
+      required: true
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Milestone
+      options:
+        - M0 - Specification and baseline
+        - M1 - Status, errors, and workflow contracts
+        - M2 - Official app installation reliability
+        - M3 - Router response verification
+        - M4 - Configuration transactions and secrets
+        - M5 - Simple-user interaction
+        - M6 - Diagnostics and lifecycle
+        - M7 - Signing and enterprise delivery
+    validations:
+      required: true
+  - type: textarea
+    id: user_problem
+    attributes:
+      label: User problem
+      description: Describe the observable problem without prescribing an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Include success, failure, retry, and rollback behavior where applicable.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: State what this work package will not change.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Required evidence
+      description: List automated tests, platform builds, VM scenarios, screenshots, or logs.
+    validations:
+      required: true
+  - type: checkboxes
+    id: gates
+    attributes:
+      label: Completion gates
+      options:
+        - label: Error and recovery behavior is specified.
+          required: true
+        - label: Security and log redaction impact is reviewed.
+          required: true
+        - label: Traceability matrix will be updated before closing.
+          required: true

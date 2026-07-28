@@ -509,6 +509,7 @@ name = "company-codex-tauri-gui"
 version = "0.8.8"
 dependencies = [
  "base64 0.22.1",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
@@ -519,6 +520,8 @@ dependencies = [
  "tungstenite",
  "ureq",
  "url",
+ "uuid",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

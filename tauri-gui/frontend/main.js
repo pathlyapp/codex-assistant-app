@@ -62,6 +62,8 @@ const state = {
   keyVisible: false,
   lineCount: 0,
   finishedHandled: false,
+  currentOperationId: "",
+  finishedOperationId: "",
   selectedAppearance: "official",
   customThemeReady: false,
   appearanceRequestId: 0,
@@ -171,7 +173,7 @@ async function refreshStatus({ hydrateForm = false } = {}) {
   button.classList.add("spinning");
   if (!state.status) setReadiness("loading", "正在检查本机状态", "正在读取官方应用、Codex 配置和 Router。", "请稍候");
   try {
-    const status = await tauri.core.invoke("get_system_status");
+    const status = normalizeSystemStatus(await tauri.core.invoke("get_system_status"));
     state.status = status;
     renderSystemStatus(status);
     if (!state.formDirty) hydrateRouterForm(status);
@@ -186,20 +188,28 @@ async function refreshStatus({ hydrateForm = false } = {}) {
 }
 
 function renderSystemStatus(status) {
-  const ready = Boolean(status.ready);
+  const ready = status.overall === "ready";
+  const recommendedAction = status.recommendedAction || {
+    id: ready ? "open_chatgpt" : "configure_router",
+    label: ready ? "打开 ChatGPT" : "开始配置",
+  };
   if (ready) {
-    setReadiness("ready", "Codex 已准备就绪", `${status.configuredModel} 已连接，可以从 ChatGPT 进入 Codex。`, "打开 ChatGPT");
+    setReadiness(
+      "ready",
+      "Codex 已准备就绪",
+      `${status.configuredModel} 已连接，可以从 ChatGPT 进入 Codex。`,
+      recommendedAction.label,
+    );
   } else {
     const missing = [];
     if (!status.appInstalled) missing.push("ChatGPT");
     if (!status.configPresent) missing.push("Codex 配置");
     if (!status.routerReachable) missing.push("Router 连接");
-    const installFirst = !status.appInstalled && status.platform === "Windows";
     setReadiness(
       "attention",
-      "还需要完成配置",
+      status.overall === "blocked" ? "Router 当前不可用" : "还需要完成配置",
       `待处理：${missing.join("、") || "重新检查状态"}`,
-      installFirst ? "安装并配置" : "开始配置",
+      recommendedAction.label,
     );
   }
   $("#overviewAction").disabled = false;
@@ -280,15 +290,20 @@ function hydrateRouterForm(status) {
 }
 
 function onOverviewAction() {
-  if (state.status?.ready) {
-    openChatGPT();
-    return;
+  const action = state.status?.recommendedAction?.id;
+  switch (action) {
+    case "open_chatgpt":
+      openChatGPT();
+      break;
+    case "install_chatgpt":
+      installChatGPT({ continueToSetup: true });
+      break;
+    case "open_install_guide":
+      navigate("diagnostics");
+      break;
+    default:
+      navigate("setup");
   }
-  if (state.status && !state.status.appInstalled && state.status.platform === "Windows") {
-    installChatGPT({ continueToSetup: true });
-    return;
-  }
-  navigate("setup");
 }
 
 function applyPreset(preset) {
@@ -398,6 +413,12 @@ async function testRouter({ announce = false } = {}) {
     populateModels([], "");
     setModelReady(false, 0);
     setConnectionResult("error", friendlyError(error));
+    const code = errorCode(error);
+    if (code === "ROUTER_AUTH_FAILED") {
+      $("#keyInput").focus();
+    } else if (["ROUTER_DNS_FAILED", "ROUTER_CONNECTION_REFUSED", "ROUTER_TIMEOUT", "ROUTER_TLS_FAILED"].includes(code)) {
+      $("#gatewayInput").focus();
+    }
     return false;
   } finally {
     button.disabled = false;
@@ -453,6 +474,8 @@ async function applyConfiguration(event) {
   }
   state.running = true;
   state.finishedHandled = false;
+  state.currentOperationId = "";
+  state.finishedOperationId = "";
   state.tasks = {};
   state.messages = {};
   state.lineCount = 0;
@@ -479,6 +502,10 @@ async function applyConfiguration(event) {
 
 function applyStage(stage) {
   if (!stage?.stage) return;
+  if (stage.operationId) {
+    if (state.currentOperationId && state.currentOperationId !== stage.operationId) return;
+    state.currentOperationId = stage.operationId;
+  }
   state.tasks[stage.stage] = normalizedStatus(stage.status);
   state.messages[stage.stage] = stage.message || "";
   renderTasks();
@@ -515,21 +542,27 @@ function renderTasks() {
 
 function taskIcon(status) {
   if (status === "running") return `<span class="icon spin">${ICONS.loader}</span>`;
-  if (status === "complete" || status === "skipped") return `<span class="icon">${ICONS.check}</span>`;
+  if (status === "complete" || status === "skipped" || status === "restored") return `<span class="icon">${ICONS.check}</span>`;
   if (status === "failed") return `<span class="icon">${ICONS.alert}</span>`;
   return `<span class="icon">${ICONS.circle}</span>`;
 }
 
 function taskStatusLabel(status) {
-  return { running: "进行中", complete: "已完成", skipped: "已确认", failed: "失败", waiting: "等待" }[status] || "等待";
+  return { running: "进行中", complete: "已完成", skipped: "已确认", failed: "失败", restored: "已恢复", waiting: "等待" }[status] || "等待";
 }
 
 function normalizedStatus(status) {
-  if (["complete", "skipped", "failed", "running"].includes(status)) return status;
+  if (["complete", "skipped", "failed", "restored", "running"].includes(status)) return status;
   return "waiting";
 }
 
 function finishRun(payload) {
+  if (payload.operationId) {
+    if (state.currentOperationId && state.currentOperationId !== payload.operationId) return;
+    if (state.finishedOperationId === payload.operationId) return;
+    state.currentOperationId = payload.operationId;
+    state.finishedOperationId = payload.operationId;
+  }
   if (state.finishedHandled) return;
   state.finishedHandled = true;
   state.running = false;
@@ -627,7 +660,7 @@ async function installChatGPT({ continueToSetup = false } = {}) {
   }
   renderAppInstallState();
   try {
-    const status = await tauri.core.invoke("install_chatgpt_app");
+    const status = normalizeSystemStatus(await tauri.core.invoke("install_chatgpt_app"));
     state.status = status;
     renderSystemStatus(status);
     showToast("ChatGPT 已通过官方渠道安装");
@@ -1128,11 +1161,72 @@ function closeConfirmation(accepted) {
 }
 
 function friendlyError(error) {
+  const envelope = errorEnvelope(error);
+  if (envelope) {
+    if (envelope.title && envelope.message && envelope.title !== envelope.message) {
+      return `${envelope.title}：${envelope.message}`;
+    }
+    return envelope.message || envelope.title || `操作未完成（${envelope.code}）`;
+  }
   const text = String(error?.message || error || "未知错误");
   return text
     .replace(/^Error:\s*/i, "")
     .replace(/Transport\([^)]*\)/g, "连接失败")
     .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]");
+}
+
+function errorEnvelope(error) {
+  if (error && typeof error === "object" && error.code && error.schemaVersion) return error;
+  const candidate = error?.message;
+  if (candidate && typeof candidate === "object" && candidate.code && candidate.schemaVersion) return candidate;
+  if (typeof candidate === "string" || typeof error === "string") {
+    const text = typeof candidate === "string" ? candidate : error;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.code && parsed?.schemaVersion) return parsed;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function errorCode(error) {
+  return errorEnvelope(error)?.code || "LEGACY_UNCLASSIFIED";
+}
+
+function normalizeSystemStatus(status = {}) {
+  if (status.schemaVersion === 1 && status.app && status.router && status.config) {
+    return {
+      ...status,
+      appInstalled: Boolean(status.app.installed),
+      appName: status.app.name || "ChatGPT",
+      appVersion: status.app.version || null,
+      appDetail: status.app.detail || "",
+      configPresent: Boolean(status.config.present),
+      configPath: status.config.path || "",
+      routerReachable: Boolean(status.router.reachable),
+      routerDetail: status.router.detail || "",
+      configuredGateway: status.router.gateway || null,
+      configuredModel: status.router.model || null,
+      keyConfigured: Boolean(status.router.keyConfigured),
+      backupAvailable: Boolean(status.config.backupAvailable),
+      ready: status.overall === "ready",
+    };
+  }
+
+  const ready = Boolean(status.ready);
+  const action = ready
+    ? { id: "open_chatgpt", label: "打开 ChatGPT" }
+    : !status.appInstalled && status.platform === "Windows"
+      ? { id: "install_chatgpt", label: "安装并配置" }
+      : { id: "configure_router", label: "开始配置" };
+  return {
+    ...status,
+    schemaVersion: status.schemaVersion || 0,
+    overall: ready ? "ready" : "action_required",
+    recommendedAction: status.recommendedAction || action,
+  };
 }
 
 function formatArchitecture(architecture) {

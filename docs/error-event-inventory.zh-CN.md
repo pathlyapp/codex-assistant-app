@@ -1,0 +1,104 @@
+# M0 错误与事件清单
+
+本清单是 M1 契约和验收夹具的事实源。Tauri command 统一返回
+`ErrorEnvelopeV1`；`String` 仅允许保留在 Rust 内部实现层。前端不得依赖中文字符串
+包含关系决定动作。
+
+## 1. 稳定错误分类
+
+| 稳定 code | 当前来源示例 | stage | recoverable | suggestedAction |
+| --- | --- | --- | --- | --- |
+| `APP_NOT_INSTALLED` | 未检测到 ChatGPT | `preflight` | true | `install_app` |
+| `APP_PACKAGE_UNTRUSTED` | 包名、publisher 或来源不符合要求 | `install_chatgpt` | false | `open_diagnostics` |
+| `APP_INSTALL_FAILED` | winget 失败或安装后仍未检测到 | `install_chatgpt` | true | `retry_install` |
+| `APP_RESTART_REQUIRED` | 系统完成安装前需要重启 | `install_chatgpt` | true | `restart_system` |
+| `UNSUPPORTED_PLATFORM` | 当前平台不支持自动安装或启动 | `preflight` | false | `open_install_guide` |
+| `ROUTER_URL_INVALID` | Router 地址格式不正确 | `validate_router_models` | true | `edit_gateway` |
+| `ROUTER_DNS_FAILED` | 主机名解析失败 | `validate_router_models` | true | `edit_gateway` |
+| `ROUTER_CONNECTION_REFUSED` | 目标端口拒绝连接 | `validate_router_models` | true | `check_router` |
+| `ROUTER_TIMEOUT` | 连接或读取超时 | `validate_router_models` | true | `retry_router` |
+| `ROUTER_TLS_FAILED` | TLS、证书或企业 CA 失败 | `validate_router_models` | true | `open_diagnostics` |
+| `ROUTER_AUTH_FAILED` | HTTP 401/403 | `validate_router_models` | true | `edit_key` |
+| `ROUTER_VM_LOOPBACK` | Windows ARM64 VM 将 `127.0.0.1` 指向虚拟机自身 | `validate_router_models` | true | `edit_gateway` |
+| `ROUTER_LOCAL_SERVICE_MISSING` | 本机 Ollama 未安装或未启动 | `validate_router_models` | true | `check_router` |
+| `ROUTER_OLLAMA_HOST_UNREACHABLE` | 宿主机 Ollama 未监听可访问接口或桥接未启动 | `validate_router_models` | true | `edit_gateway` |
+| `ROUTER_MODELS_INVALID` | `/models` 为空或结构不兼容 | `validate_router_models` | true | `check_router` |
+| `ROUTER_MODEL_UNAVAILABLE` | 所选模型不在返回列表 | `validate_router_models` | true | `select_model` |
+| `ROUTER_RESPONSES_UNSUPPORTED` | `/responses` 不能完成最小请求 | `validate_router_response` | true | `check_router` |
+| `CONFIG_PERMISSION_DENIED` | 目录或文件写入被拒绝 | `configure_codex` | true | `repair_permissions` |
+| `CONFIG_PARSE_FAILED` | 现有配置不是有效 TOML | `configure_codex` | true | `restore_config` |
+| `CONFIG_OVERRIDDEN` | 项目或管理员配置覆盖用户配置 | `verify` | true | `show_effective_source` |
+| `CONFIG_VERIFY_FAILED` | 写入后内容、模型或应用复核失败 | `verify` | true | `restore_config` |
+| `ROLLBACK_FAILED` | 自动恢复失败 | `rollback` | false | `contact_support` |
+| `SECRET_STORE_FAILED` | DPAPI、Keychain 或 helper 失败 | `configure_codex` | true | `open_diagnostics` |
+| `PROXY_AUTH_REQUIRED` | 企业代理要求认证 | `validate_router_models` | true | `configure_proxy` |
+| `APPEARANCE_UNSUPPORTED` | 平台、版本或主题类型不支持 | `appearance_apply` | false | `open_diagnostics` |
+| `APPEARANCE_IMAGE_INVALID` | 图片格式、尺寸或内容不符合要求 | `appearance_import` | true | `choose_image` |
+| `APPEARANCE_GALLERY_UNAVAILABLE` | 在线主题库网络或响应失败 | `appearance_gallery` | true | `retry_gallery` |
+| `APPEARANCE_PACKAGE_INVALID` | 主题包完整性或安全校验失败 | `appearance_apply` | true | `retry_gallery` |
+| `APPEARANCE_STORAGE_FAILED` | 本地主题目录无法写入 | `appearance_*` | true | `repair_permissions` |
+| `APPEARANCE_STATE_FAILED` | 外观状态或内置主题读取失败 | `appearance_status/presets` | true | `retry_appearance` |
+| `APPEARANCE_APPLY_FAILED` | ChatGPT 主题启动或注入失败 | `appearance_apply` | true | `retry_appearance` |
+| `INTERNAL_TASK_FAILED` | 后台任务 join/panic 或未知失败 | 当前 command | true | `retry` |
+
+主题、图库和外观错误使用独立 `appearance_*` stage，不改变核心
+`SystemStatus.overall`。
+
+## 2. 当前工作流事件
+
+事件名：`installer-stage`
+
+当前内部阶段：
+
+| 顺序 | stage | 当前状态 | 主要缺口 |
+| --- | --- | --- | --- |
+| 1 | `preflight` | `running/complete/failed` | 取消语义转入 M5 |
+| 2 | `install_chatgpt` | `running/complete/skipped/failed` | 安装来源和可信结果未结构化 |
+| 3 | `validate_router` | `running/complete/failed` | 应拆分 models 与 responses |
+| 4 | `configure_codex` | `running/complete/failed` | transaction ID 和 rollback 事件转入 M4 |
+| 5 | `verify` | `running/complete/failed` | 仅复查 `/models`，无 Responses |
+
+当前事件字段：`schemaVersion`、`operationId`、`stage`、`label`、`status`、
+`message`、`current`、`total`、`cancellable`、`recoverable`、`details`。
+合法状态为 `waiting|running|complete|skipped|failed|restored`，非法转换已有单元
+测试阻断。
+
+## 3. 当前命令边界
+
+核心命令已返回 `ErrorEnvelopeV1`：
+
+- `get_system_status`
+- `discover_models`
+- `start_setup`
+- `install_chatgpt_app`
+- `launch_chatgpt`
+- `restart_chatgpt`
+- `restore_codex_config`
+- `factory_reset`
+
+外观命令也使用同一 envelope，并以 `appearance_*` stage 隔离：
+
+- `get_appearance_status`
+- `apply_appearance`
+- `import_theme_image`
+- `list_preset_themes`
+- `list_gallery_themes`
+
+底层文件、网络和平台函数仍可在 Rust 内部使用 `Result<_, String>`，但字符串错误必须
+在 command 边界转换并经过统一脱敏后才能进入前端。
+
+## 4. 脱敏约束
+
+`technical` 和日志中禁止出现：
+
+- Bearer Token、Access Key、URL userinfo 和查询参数中的凭据。
+- DPAPI/Keychain 解密结果。
+- 请求体中的用户业务文本。
+- 可直接识别个人的完整用户目录；导出诊断时应缩写为用户目录标记。
+
+允许保留：
+
+- 安全的 HTTP 状态码。
+- 已脱敏 host、端口和路径类别。
+- Router 返回的安全 request ID。
+- support ID、operation ID、stage 和稳定 code。

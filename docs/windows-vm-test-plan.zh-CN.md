@@ -1,24 +1,72 @@
 # Windows VM 验收计划
 
-目标产物：
+## PD Windows ARM64 本地构建环境
+
+Parallels `prlctl exec` 默认可能使用 SYSTEM 环境。构建可以使用 SYSTEM 的临时目录，
+但安装和 UI 验收必须增加 `--current-user`，否则注册表和安装目录会落到
+`C:\Windows\System32\config\systemprofile`，不代表客户用户环境。
+
+当前 VM 的 Build Tools 位于 `C:\BuildTools`。本地构建统一使用脚本加载 MSVC/LLVM、
+核对 Rust target、执行测试并输出带 SHA256 的标准命名候选包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows-build.ps1 -Architecture auto
+```
+
+在 ARM64 构建机交叉生成 x64 候选时，先执行一次
+`rustup target add x86_64-pc-windows-msvc`，再传入 `-Architecture x64`。只调用
+`cargo` 或 `npm` 而不加载对应环境会导致 `ring` 找不到 `clang`，或者链接阶段找不到
+MSVC/Windows SDK。不要在 macOS 与 Windows 之间共用同一个 Cargo `target` 目录；
+应先将源码复制到 VM 本地临时目录再构建。
+
+2026-07-28 的 M1 候选证据：
+
+- Windows 11 Pro ARM64。
+- Rust 测试：28 passed，0 failed，1 ignored。
+- NSIS：`CodexAssistant-0.8.8-windows-arm64-setup.exe`。
+- ARM64 SHA256：`24ca87048a003cb8f23e801f3c138a502b8b81ada31fe5795ab2965bbf895491`。
+- x64 SHA256：`bf5673b79248e6c0c23da49c09c2acdf095c82c7ddefe918ee56047fae4ecf0f`。
+- 两份候选源提交：`af09091`。
+- 0.8.4 -> 0.8.8 当前用户升级成功。
+- ARM64 原生和 x64 兼容层均通过静默安装不自启、首次响应和重复启动单实例。
+- x64 首次冒烟曾持续出现两个主窗口；加入 Windows 前置互斥/聚焦兜底后通过。真实
+  x64 机器仍是发布门禁，兼容层结果不得替代。
+
+同日 `9885c16` 的 M1 契约收口候选证据：
+
+- Windows ARM64/x64 目标测试均为 31 passed、0 failed、1 ignored。
+- ARM64 SHA256：
+  `44af1a88df24f38b58f046e33413273b2cada5a35da70466ce040de81acb4b12`。
+- x64 SHA256：
+  `745b5e12054f8a09ca9a201d96487279dc6f311340547234d93e3b52dcfe41ea`。
+- 两架构均通过静默安装不自启、首次响应和重复启动单实例；x64 仍仅为 ARM64
+  兼容层证据。
+- UI E2E 首次发现 Windows ARM64 Ollama 专用提示在 envelope 迁移后丢失；新增
+  `ROUTER_VM_LOOPBACK` 后回归通过。
+- 修复后的当前用户 E2E：配置期间 ChatGPT 进程数为 0，Router 模型选择、配置写入、
+  备份入口和恢复 round-trip 通过。Router 为 Parallels 专用网卡上的隔离测试服务，
+  只作为 `/models` 流程证据。
+- E2E 额外断言首页状态徽标、配置页 Gateway 和诊断摘要与同一次
+  `SystemStatusV1` 一致。
+
+标准产物：
 
 ```text
-CodexAssistantSetup-0.8.4-arm64.exe
+tauri-gui\artifact\CodexAssistant-<version>-windows-<arch>-setup.exe
 ```
 
 ## 1. 构建
 
 ```powershell
 cd C:\path\to\codex-gateway-poc-installer\tauri-gui
-npm ci
-cargo test --manifest-path .\src-tauri\Cargo.toml
-npm run build:windows
+powershell -ExecutionPolicy Bypass -File .\tools\windows-build.ps1 -Architecture auto
 ```
 
-NSIS 产物位于：
+脚本输出 JSON 证据，至少包含版本、目标架构、原生架构、文件大小和 SHA256。Tauri
+原始 NSIS 产物仍位于：
 
 ```text
-src-tauri\target\release\bundle\nsis\
+src-tauri\target\<rust-target>\release\bundle\nsis\
 ```
 
 ## 2. 安装 Codex 助手
@@ -38,8 +86,13 @@ src-tauri\target\release\bundle\nsis\
 自动冒烟验证：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\windows-installer-smoke.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\windows-installer-smoke.ps1 `
+  -InstallerPath C:\path\to\CodexAssistant-0.8.8-windows-arm64-setup.exe `
+  -ExpectedSha256 24ca87048a003cb8f23e801f3c138a502b8b81ada31fe5795ab2965bbf895491
 ```
+
+冒烟脚本必须由交互用户执行；检测到 SYSTEM 会直接失败。它按当前用户卸载注册表
+定位安装目录，并验证候选摘要、静默安装不自启、首次启动有响应和重复启动单实例。
 
 ## 3. Ollama 准备
 

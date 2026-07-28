@@ -1,12 +1,33 @@
 # installer-core 协议
 
-0.8.4 的 installer-core 完全由 Rust 实现，不调用 Go sidecar。前端只消费 Tauri command 和结构化事件，不理解 Appx、DPAPI 或 TOML 写入细节。
+0.8.8 开发基线的 installer-core 完全由 Rust 实现，不调用 Go sidecar。前端只消费
+Tauri command 和结构化事件，不理解 Appx、DPAPI 或 TOML 写入细节。
 
 ## 命令
 
 ### `get_system_status`
 
-返回：
+返回 `SystemStatusV1`。`schemaVersion` 当前为 `1`，Rust 统一计算 `overall` 和
+`recommendedAction`：
+
+```json
+{
+  "schemaVersion": 1,
+  "overall": "ready|action_required|blocked",
+  "app": {},
+  "router": {},
+  "config": {},
+  "recommendedAction": {
+    "id": "open_chatgpt",
+    "label": "打开 ChatGPT"
+  }
+}
+```
+
+V1 同时保留 0.8.x 扁平字段一个兼容周期。前端适配器只允许从 `overall` 派生
+`ready`，不得再组合应用、配置和 Router 三个布尔值判断整体成功。
+
+状态内容：
 
 - 官方 ChatGPT 是否安装及版本。
 - 当前平台与 CPU 架构。
@@ -45,7 +66,9 @@ preflight
 - `configure_codex`：加密 Key、写状态/model catalog、备份并使用结构化 TOML API 更新用户级 `config.toml`；只替换助手管理的 provider，保留 ChatGPT 其它设置。
 - `verify`：重新读取状态和配置，再次请求 Router，并再次确认官方 ChatGPT。
 
-任何阶段失败都会产生 `failed` 事件和非成功结果，不允许用 warning 代替完成条件。
+任何阶段失败都会产生 `failed` 事件、`ErrorEnvelopeV1` 和非成功结果，不允许用
+warning 代替完成条件。当前最终复核仍以 `/models` 为准；`/responses` 探针属于 M3，
+因此不能把 V1 的 `models_verified` 描述成 Responses 已验证。
 
 ### `launch_chatgpt`
 
@@ -59,7 +82,11 @@ preflight
 
 恢复时间戳最新的完整快照，包括 `config.toml`、助手运行状态、模型目录和可选 DPAPI Key。恢复前先为当前状态生成一个新的完整快照，因此再次恢复可以撤销本次操作；前端随后执行用户已确认的 ChatGPT 重启。
 
-### `get_appearance_status` / `apply_appearance`
+### 外观命令
+
+`get_appearance_status`、`apply_appearance`、`import_theme_image`、
+`list_preset_themes` 和 `list_gallery_themes` 使用与核心命令相同的
+`ErrorEnvelopeV1`，但 stage 固定在 `appearance_*` 命名空间。
 
 当前主题：
 
@@ -74,12 +101,15 @@ preflight
 
 ```json
 {
+  "schemaVersion": 1,
+  "operationId": "uuid",
   "stage": "validate_router",
   "label": "验证 Router",
-  "status": "running|complete|skipped|failed",
+  "status": "waiting|running|complete|skipped|failed|restored",
   "message": "用户可读状态",
   "current": 3,
   "total": 5,
+  "cancellable": false,
   "recoverable": false,
   "details": {}
 }
@@ -87,7 +117,28 @@ preflight
 
 `installer-log`：脱敏文本日志。
 
-`installer-finished`：最终结果及已完成阶段。前端对重复 event/invoke 返回做幂等处理。
+`installer-finished`：包含相同 `operationId`、最终结果、可选 `ErrorEnvelopeV1` 及
+已完成阶段。前端按 `operationId` 忽略过期或重复 event/invoke 返回。
+
+核心命令失败返回：
+
+```json
+{
+  "schemaVersion": 1,
+  "code": "ROUTER_CONNECTION_REFUSED",
+  "stage": "validate_router_models",
+  "title": "Router 拒绝连接",
+  "message": "请确认服务已启动、地址和端口正确，并允许当前设备访问。",
+  "recoverable": true,
+  "suggestedAction": "check_router",
+  "supportId": "CA-<timestamp>-<random>",
+  "technical": {
+    "detail": "redacted"
+  }
+}
+```
+
+外观命令失败不得改变核心 `SystemStatus.overall`。
 
 ## Codex 配置
 

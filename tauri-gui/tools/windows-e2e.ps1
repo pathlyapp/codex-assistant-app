@@ -119,8 +119,41 @@ $connection = Invoke-CdpExpression $socket @"
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   if (refresh.disabled || overviewAction.disabled) throw new Error('Initial status check did not finish');
-  document.querySelector('[data-view="setup"]').click();
   const status = await window.__TAURI__.core.invoke('get_system_status');
+  const statusEvidence = {
+    app: document.querySelector('#appStatusBadge').classList.contains('success'),
+    router: document.querySelector('#routerStatusBadge').classList.contains('success'),
+    config: document.querySelector('#configStatusBadge').classList.contains('success')
+  };
+  if (statusEvidence.app !== status.appInstalled ||
+      statusEvidence.router !== status.routerReachable ||
+      statusEvidence.config !== status.configPresent) {
+    throw new Error('Overview status cards disagree with SystemStatusV1: ' + JSON.stringify({
+      status: {
+        appInstalled: status.appInstalled,
+        routerReachable: status.routerReachable,
+        configPresent: status.configPresent
+      },
+      rendered: statusEvidence
+    }));
+  }
+  document.querySelector('[data-view="diagnostics"]').click();
+  const diagnosticEvidence = {
+    app: document.querySelector('#diagApp').textContent.trim(),
+    router: document.querySelector('#diagRouter').textContent.trim(),
+    config: document.querySelector('#diagConfig').textContent.trim()
+  };
+  if ((status.appDetail && !diagnosticEvidence.app.includes(status.appDetail)) ||
+      (status.routerDetail && !diagnosticEvidence.router.includes(status.routerDetail)) ||
+      (status.configPresent && status.configuredModel &&
+       !diagnosticEvidence.config.includes(status.configuredModel))) {
+    throw new Error('Diagnostics status disagrees with SystemStatusV1');
+  }
+  document.querySelector('[data-view="setup"]').click();
+  const expectedGateway = status.configuredGateway || 'http://127.0.0.1:11434/v1';
+  if (document.querySelector('#gatewayInput').value !== expectedGateway) {
+    throw new Error('Setup form gateway disagrees with SystemStatusV1');
+  }
   let localOllamaDiagnostic = '';
   if (status.platform === 'Windows' && ['aarch64', 'arm64'].includes(status.architecture)) {
     document.querySelector('[data-preset="ollama"]').click();
@@ -154,6 +187,7 @@ $connection = Invoke-CdpExpression $socket @"
     className: result.className,
     message: result.textContent.trim(),
     gateway: input.value,
+    statusConsistency: true,
     localOllamaDiagnostic,
     models: [...document.querySelector('#modelInput').options].map(option => option.value).filter(Boolean),
     selectedModel: document.querySelector('#modelInput').value
@@ -426,6 +460,7 @@ $socket.Dispose()
   router = $RouterUrl
   models = $connection.models
   selectedModel = $connection.selectedModel
+  statusConsistency = [bool]$connection.statusConsistency
   keyConfigured = $keyConfigured
   resultTitle = $result.title
   localOllamaDiagnostic = $connection.localOllamaDiagnostic
