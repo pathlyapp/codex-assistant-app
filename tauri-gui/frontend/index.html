@@ -128,20 +128,46 @@
         </section>
 
         <section id="setupView" class="view" data-view-panel="setup">
+          <div id="setupStepper" class="compact-stepper" role="list" aria-label="配置步骤">
+            <span class="active" data-guided-step="environment" role="listitem" aria-current="step"><b>1</b><em>环境检测</em></span>
+            <i aria-hidden="true"></i>
+            <span data-guided-step="app" role="listitem"><b>2</b><em>安装或修复</em></span>
+            <i aria-hidden="true"></i>
+            <span data-guided-step="service" role="listitem"><b>3</b><em>连接服务</em></span>
+            <i aria-hidden="true"></i>
+            <span data-guided-step="verify" role="listitem"><b>4</b><em>验证完成</em></span>
+          </div>
+
           <div id="setupFormPanel">
-            <div class="compact-stepper" aria-label="配置步骤">
-              <span class="active" data-form-step="connect"><b>1</b>连接服务</span>
-              <i></i>
-              <span data-form-step="model"><b>2</b>选择模型</span>
-              <i></i>
-              <span data-form-step="apply"><b>3</b>应用并验证</span>
-            </div>
+            <section class="setup-prerequisites" aria-label="准备状态">
+              <div class="prerequisite-row">
+                <span class="prerequisite-icon"><span class="icon" data-icon="cpu"></span></span>
+                <span class="prerequisite-copy">
+                  <strong>运行环境</strong>
+                  <small id="setupEnvironmentDetail">正在读取系统与架构信息</small>
+                </span>
+                <span id="setupEnvironmentState" class="status-badge pending">检查中</span>
+              </div>
+              <div class="prerequisite-row">
+                <span class="prerequisite-icon"><span class="icon" data-icon="appWindow"></span></span>
+                <span class="prerequisite-copy">
+                  <strong>ChatGPT 官方应用</strong>
+                  <small id="setupAppDetail">正在检查安装状态</small>
+                </span>
+                <span class="prerequisite-side">
+                  <span id="setupAppState" class="status-badge pending">检查中</span>
+                  <button id="setupInstallButton" class="secondary-button prerequisite-action hidden" type="button">
+                    <span class="icon" data-icon="download"></span><span>安装</span>
+                  </button>
+                </span>
+              </div>
+            </section>
 
             <form id="routerForm" class="router-form">
               <section class="form-section">
                 <div class="section-heading">
                   <div>
-                    <span class="section-kicker">步骤 1</span>
+                    <span class="section-kicker">服务配置</span>
                     <h2>连接模型服务</h2>
                     <p>填写 OpenAI 兼容服务地址，助手会自动规范为 <code>/v1</code>。</p>
                   </div>
@@ -191,7 +217,7 @@
               <section id="modelSection" class="form-section model-section locked">
                 <div class="section-heading">
                   <div>
-                    <span class="section-kicker">步骤 2</span>
+                    <span class="section-kicker">模型配置</span>
                     <h2>选择默认模型</h2>
                     <p id="modelSectionHelp">连接成功后可选择 Router 返回的真实模型。</p>
                   </div>
@@ -239,14 +265,19 @@
             </details>
           </section>
 
-          <section id="resultPanel" class="result-panel hidden" aria-live="polite">
+          <section id="resultPanel" class="result-panel hidden" aria-live="polite" tabindex="-1">
             <div id="resultMark" class="result-mark success"><span class="icon" data-icon="check"></span></div>
             <h2 id="resultTitle">配置完成</h2>
             <p id="resultText">ChatGPT、Codex 配置和 Router 已全部通过检查。</p>
+            <div id="resultRecovery" class="result-recovery hidden" role="status">
+              <span class="icon" data-icon="rotateCcw"></span>
+              <span id="resultRecoveryText"></span>
+            </div>
             <div id="resultSummary" class="result-summary"></div>
             <div class="result-actions">
               <button id="launchButton" class="primary-button" type="button"><span>重启并打开 ChatGPT</span><span class="icon" data-icon="externalLink"></span></button>
               <button id="resultBackButton" class="secondary-button" type="button">返回修改</button>
+              <button id="resultDiagnosticButton" class="ghost-button" type="button"><span class="icon" data-icon="copy"></span><span>复制诊断</span></button>
               <button id="resultLogButton" class="ghost-button" type="button">查看技术日志</button>
             </div>
             <small class="result-footnote">重启只在点击按钮后执行，尚未发送的 ChatGPT 输入不会被自动处理。</small>
@@ -267,6 +298,7 @@
             <div><span>Codex 配置</span><strong id="diagConfig">检查中</strong></div>
             <div><span>Router</span><strong id="diagRouter">检查中</strong></div>
             <div><span>配置路径</span><code id="diagConfigPath">检查中</code></div>
+            <div><span>外观模式</span><strong>浅色（当前版本）</strong></div>
           </div>
           <div class="diagnostic-actions">
             <button id="diagnosticCopyButton" class="secondary-button" type="button"><span class="icon" data-icon="copy"></span><span>复制诊断信息</span></button>

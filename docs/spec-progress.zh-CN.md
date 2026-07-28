@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@e048346` |
+| 开发基线 | `main@e84c3c0` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m4-config-transaction` |
-| 当前 PR | [#17](https://github.com/theivanxu/codex-assistant/pull/17) |
+| 当前分支 | `feat/m5-guided-setup` |
+| 当前 PR | [#18](https://github.com/theivanxu/codex-assistant/pull/18) |
 | 当前应用版本 | `0.8.8` |
 | 下一内部候选 | `0.9.0-alpha.1` |
-| 当前主里程碑 | M0/M1/M3 外部门禁；M4 配置事务 v2 |
+| 当前主里程碑 | M0/M1/M3/M4 外部门禁；M5 小白用户向导 |
 
 ## 里程碑状态
 
@@ -25,8 +25,8 @@
 | M1 状态、错误和工作流契约 | 待验证 | PR #15 已合并；全部 Tauri command 使用 V1 envelope，状态、阶段事件、跨平台错误 fixture 和脱敏已接入 | Windows UI 错误交互复核，补齐取消与跨重启恢复边界 |
 | M2 官方应用安装可靠性 | 未开始 | Windows 使用 Store/winget，结果会二次检测 | 可信来源、架构、安装结果和恢复路径可审计 |
 | M3 Router 真实响应验证 | 待验证 | PR #16 已合并；`/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
-| M4 配置事务与跨平台密钥 | 进行中 | PR #17 实现事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复；Windows ARM64 E2E 通过 | 文件系统故障矩阵、真实断电恢复、有效来源检测和 macOS Keychain |
-| M5 小白用户交互 | 未开始 | 首页和向导可用，但仍依赖部分前端推断 | 唯一主动作、真实状态、失败可恢复、可访问性通过 |
+| M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E | 文件系统故障矩阵、真实断电恢复、有效来源检测和 macOS Keychain |
+| M5 小白用户交互 | 进行中 | 四步用户向导、真实前置状态、成功摘要、回滚提示、常驻复制诊断和响应式断点已接入 | Windows 成功/失败/回滚 E2E，125%/150% 缩放、键盘和屏幕阅读器验收 |
 | M6 诊断与生命周期 | 未开始 | 有基础诊断和手动恢复 | 脱敏诊断包、定向修复、升级/卸载 E2E |
 | M7 签名与企业交付 | 未开始 | CI 可构建三平台，Release 有 SHA256，尚未签名 | Windows 签名、macOS 公证、企业网络与发布门禁 |
 
@@ -47,6 +47,11 @@
 | WP-303 Responses Probe | 待验证 | 固定 `Return OK.`、16 token、SSE/JSON、完成事件、模型一致性、正文不留存；Windows ARM64 正常/404/断流 E2E | 真实 Ollama/LM Studio 兼容服务 |
 | WP-304 Router 错误 UX | 待验证 | 404 和流中断停在稳定步骤 ID；配置不变、旧证据撤销、状态退回 `models_verified` | 真实服务、代理和私有 CA 错误动作验收 |
 | WP-402 配置事务 v2 | 待验证 | PR #17；事务 manifest/SHA256、同目录原子替换、启动恢复、自动回滚、可逆恢复；Windows ARM64 正常/故障/重试/恢复 E2E | 权限/磁盘满/替换失败、真实进程中断、macOS 平台 E2E |
+| WP-501 状态首页 | 待验证 | 首页只显示整体主动作、三项真实状态和当前服务；消费 `SystemStatusV1/recommendedAction` | 小尺寸、缩放和长错误文案实机复核 |
+| WP-502 四步向导 | 待验证 | `docs/m5-guided-setup.zh-CN.md`；Windows 正常、Responses 404、verify 回滚和直接重试 E2E | 实机缩放、键盘和读屏 |
+| WP-503 服务配置 | 待验证 | Router/Key/模型使用真实发现和规范化结果；原有 E2E 选择器保持稳定 | 企业代理/CA 与 macOS 实机 |
+| WP-504 错误和恢复 | 待验证 | 失败唯一主动作、日志自动展开、常驻复制诊断；Responses 失败和 verify 回滚 E2E | 其它错误码推荐动作和恢复失败注入 |
+| WP-505 平台体验 | 进行中 | 系统字体、浅色模式、原生标题栏、焦点返回和 720/560px 响应式断点 | 820x640、940x720、125%/150%、键盘和屏幕阅读器 |
 
 ## 证据规则
 
@@ -164,6 +169,27 @@
   四个受管文件哈希全部恢复，状态为 `rolled_back`，活动 journal 已删除。
 - 恢复正常 Router 后同一用户无需清理直接重试成功；手动恢复 round-trip 通过并生成
   独立 `operation=restore` 的已提交事务。配置与恢复期间均未自动启动 ChatGPT。
+- PR #17 全量 CI 通过后 squash 合并为 `main@e84c3c0`，远端 M4 特性分支已删除。
+- 从 `main@e84c3c0` 创建 `feat/m5-guided-setup`，开始 M5 小白用户交互收口。
+- 配置页改为固定四步用户向导，环境、官方应用、服务连接和最终验证分别消费真实
+  `SystemStatusV1` 与内部阶段；步骤完成态不再按序号推断。
+- 成功结果增加官方应用、规范化 Router、模型、最近验证和恢复能力；失败结果只保留
+  一个主重试动作，常驻复制诊断，并区分自动恢复成功与失败。
+- 复制诊断增加用户目录、URL userinfo、Bearer 和 query key/token 二次脱敏；确认
+  对话框关闭后恢复触发控件焦点，结果出现后主动聚焦。
+- 标准 `1280x720` 浏览器渲染无横向溢出；Rust 测试 45 通过、0 失败、1 个本地
+  Ollama live test 忽略。
+- PowerShell 5.1 首次解析新增中文断言时受系统代码页影响；E2E 改为断言稳定英文
+  `data-recovery-state/data-summary-key`，不再依赖显示文案或脚本 BOM。
+- 源提交 `6495f52` 的 Windows ARM64/x64 候选 SHA256 分别为
+  `6ec1628bc678e1db3816120e622d9384a6b88b828ade4e87f02093dd7ebdc315` 和
+  `984c67b0a28c472b9fdbe8c0bdd0fd37de8f1a66d7c2fe038647cd1f929078d3`。
+- 两 Windows 目标测试均为 45 通过、0 失败、1 忽略；ARM64 原生与 x64 兼容层
+  静默安装不自启、版本、首次响应和单实例冒烟通过，VM 最终恢复 ARM64 原生候选。
+- ARM64 正常 UI E2E 断言四步、真实前置状态、成功摘要和事务提交；Responses 404
+  稳定停在 `validate_router_response` 且配置不变，verify 故障自动回滚并显示
+  `recoveryState=restored`，四个受管文件指纹恢复。两种失败恢复 normal 后均可直接
+  重试，`-TestRestore` 通过，所有配置过程中 ChatGPT 进程为 0。
 
 ## GitHub 追踪
 

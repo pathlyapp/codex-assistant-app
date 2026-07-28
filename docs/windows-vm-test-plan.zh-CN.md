@@ -82,6 +82,23 @@ MSVC/Windows SDK。不要在 macOS 与 Windows 之间共用同一个 Cargo `targ
 - Router 恢复后同一用户无需清理直接重试成功；`-TestRestore` 通过并生成独立
   `operation=restore` 的已提交事务。
 
+同日应用源提交 `6495f52` 的 M5 四步向导候选证据：
+
+- Windows ARM64/x64 目标测试均为 45 passed、0 failed、1 ignored。
+- ARM64 SHA256：
+  `6ec1628bc678e1db3816120e622d9384a6b88b828ade4e87f02093dd7ebdc315`。
+- x64 SHA256：
+  `984c67b0a28c472b9fdbe8c0bdd0fd37de8f1a66d7c2fe038647cd1f929078d3`。
+- ARM64 原生与 x64 兼容层安装冒烟均通过；最终恢复 ARM64 原生安装。真实 x64
+  机器仍是发布门禁。
+- 正常 UI E2E 断言四个用户步骤、环境与应用前置状态、成功摘要稳定键和持久复制
+  诊断入口；配置期间 ChatGPT 进程为 0。
+- `responses-404` 停在 `validate_router_response`，配置哈希不变、旧验证证据撤销；
+  恢复 normal 后无需清理直接重试成功。
+- `verify-models-fail` 停在 `verify`，结果页为 `recoveryState=restored`，四个受管
+  文件指纹恢复、活动 journal 删除；恢复 normal 后直接重试和 `-TestRestore` 通过。
+- PowerShell 5.1 自动化只断言 ASCII `data-*` 状态，不依赖中文文案编码。
+
 M3 起不再使用只实现 `/models` 的临时服务。macOS 宿主机可在 Parallels 专用网卡
 地址上启动仓库内受控 Router：
 

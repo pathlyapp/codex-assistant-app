@@ -220,6 +220,24 @@ $connection = Invoke-CdpExpression $socket @"
     throw new Error('Diagnostics status disagrees with SystemStatusV1');
   }
   document.querySelector('[data-view="setup"]').click();
+  const guidedSteps = [...document.querySelectorAll('[data-guided-step]')].map(step => ({
+    id: step.dataset.guidedStep,
+    label: step.textContent.trim()
+  }));
+  if (guidedSteps.map(step => step.id).join(',') !== 'environment,app,service,verify') {
+    throw new Error('Guided setup does not expose the required four user steps: ' + JSON.stringify(guidedSteps));
+  }
+  const setupEvidence = {
+    environment: document.querySelector('#setupEnvironmentDetail').textContent.trim(),
+    app: document.querySelector('#setupAppDetail').textContent.trim(),
+    environmentReady: document.querySelector('#setupEnvironmentState').classList.contains('success'),
+    appReady: document.querySelector('#setupAppState').classList.contains('success')
+  };
+  if (!setupEvidence.environmentReady ||
+      setupEvidence.appReady !== status.appInstalled ||
+      !setupEvidence.environment.includes(status.platform)) {
+    throw new Error('Guided setup prerequisites disagree with SystemStatusV1: ' + JSON.stringify(setupEvidence));
+  }
   const expectedGateway = status.configuredGateway || 'http://127.0.0.1:11434/v1';
   if (document.querySelector('#gatewayInput').value !== expectedGateway) {
     throw new Error('Setup form gateway disagrees with SystemStatusV1');
@@ -258,6 +276,8 @@ $connection = Invoke-CdpExpression $socket @"
     message: result.textContent.trim(),
     gateway: input.value,
     statusConsistency: true,
+    guidedSteps,
+    setupEvidence,
     localOllamaDiagnostic,
     models: [...document.querySelector('#modelInput').options].map(option => option.value).filter(Boolean),
     selectedModel: document.querySelector('#modelInput').value
@@ -309,6 +329,13 @@ $result = Invoke-CdpExpression $socket @'
     failedTaskId: document.querySelector('.task-item.failed')?.dataset.taskId || '',
     failedStep: document.querySelector('.task-item.failed .task-copy strong')?.textContent.trim() || '',
     failedMessage: document.querySelector('.task-item.failed .task-copy small')?.textContent.trim() || '',
+    recoveryVisible: !document.querySelector('#resultRecovery').classList.contains('hidden'),
+    recoveryState: document.querySelector('#resultRecovery').dataset.recoveryState || 'none',
+    recovery: document.querySelector('#resultRecoveryText').textContent.trim(),
+    summaryKeys: [...document.querySelectorAll('#resultSummary [data-summary-key]')].map(row => row.dataset.summaryKey),
+    diagnosticActionVisible: !document.querySelector('#resultDiagnosticButton').classList.contains('hidden'),
+    retryIsPrimary: document.querySelector('#resultBackButton').classList.contains('primary-button'),
+    completedGuidedSteps: document.querySelectorAll('[data-guided-step].complete').length,
     logs: document.querySelector('#logOutput').textContent
   };
 })()
@@ -316,6 +343,7 @@ $result = Invoke-CdpExpression $socket @'
 $chatGptAfter = Get-ChatGptProcessCount
 
 if (!$result.visible) { throw "Configuration result did not become visible" }
+if (!$result.diagnosticActionVisible) { throw "Result page does not expose the persistent diagnostic action" }
 if ($chatGptBefore -ne 0 -or $chatGptAfter -ne 0) {
   throw "ChatGPT was running during configuration (before=$chatGptBefore, after=$chatGptAfter)"
 }
@@ -324,6 +352,12 @@ if ($ExpectRollback) {
   if ($result.success) { throw "Configuration unexpectedly succeeded" }
   if ($result.failedTaskId -ne "verify") {
     throw "Configuration failed at an unexpected step: $($result.failedTaskId)"
+  }
+  if (!$result.recoveryVisible -or $result.recoveryState -ne "restored") {
+    throw "Rollback result is not clearly presented to the user: $($result.recovery)"
+  }
+  if (!$result.retryIsPrimary) {
+    throw "Failure result does not expose one primary retry action"
   }
   Assert-FileFingerprint $configPath $managedBeforeSetup.config "Codex config"
   Assert-FileFingerprint $runtimeConfigPath $managedBeforeSetup.runtime "Assistant runtime state"
@@ -379,6 +413,9 @@ if ($ExpectSetupFailure) {
   if ($result.failedTaskId -ne "validate_router_response") {
     throw "Configuration failed at an unexpected step: $($result.failedTaskId)"
   }
+  if (!$result.retryIsPrimary) {
+    throw "Failure result does not expose one primary retry action"
+  }
   if (!(Test-Path $configPath)) { throw "Existing Codex config was removed after a failed probe" }
   $configHashAfterSetup = (Get-FileHash $configPath -Algorithm SHA256).Hash
   if ($configHashAfterSetup -ne $configHashBeforeSetup) {
@@ -429,6 +466,12 @@ if ($ExpectSetupFailure) {
 
 if (!$result.success) {
   throw "Configuration UI did not complete: $($result.title) $($result.message)"
+}
+if ($result.completedGuidedSteps -ne 4) {
+  throw "Successful setup did not complete all four guided steps"
+}
+if ($result.summaryKeys -notcontains "last-verified" -or $result.summaryKeys -notcontains "recovery") {
+  throw "Successful setup summary is missing validation or recovery evidence: $($result.summary)"
 }
 
 $backupUiVisible = Invoke-CdpExpression $socket @'
