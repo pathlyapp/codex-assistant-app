@@ -1,6 +1,6 @@
 [package]
 name = "company-codex-tauri-gui"
-version = "0.8.5"
+version = "0.8.7"
 description = "Codex Assistant"
 edition = "2021"
 

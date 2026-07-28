@@ -20,7 +20,7 @@ use std::io::Read;
 
 mod token_support;
 
-const VERSION: &str = "0.8.5";
+const VERSION: &str = "0.8.7";
 const CONFIG_START: &str = "# >>> CodexAssistant Managed Config";
 const CONFIG_END: &str = "# <<< CodexAssistant Managed Config";
 const LEGACY_CONFIG_START: &str = "# >>> CompanyCodex Gateway PoC";
@@ -100,6 +100,23 @@ struct SystemStatus {
 struct RestoreResult {
     restored_from: String,
     message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetStepResult {
+    id: String,
+    label: String,
+    status: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FactoryResetResult {
+    success: bool,
+    summary: String,
+    steps: Vec<ResetStepResult>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -328,6 +345,13 @@ async fn restore_codex_config() -> Result<RestoreResult, String> {
     tauri::async_runtime::spawn_blocking(restore_codex_config_inner)
         .await
         .map_err(|error| format!("恢复任务失败: {error}"))?
+}
+
+#[tauri::command]
+async fn factory_reset() -> Result<FactoryResetResult, String> {
+    tauri::async_runtime::spawn_blocking(factory_reset_inner)
+        .await
+        .map_err(|error| format!("还原任务失败: {error}"))?
 }
 
 #[tauri::command]
@@ -1039,6 +1063,235 @@ fn restore_configuration_snapshot(paths: &InstallerPaths) -> Result<RestoreResul
 
 fn restore_codex_config_inner() -> Result<RestoreResult, String> {
     restore_configuration_snapshot(&resolve_paths()?)
+}
+
+fn reset_step(id: &str, label: &str, status: &str, message: impl Into<String>) -> ResetStepResult {
+    ResetStepResult {
+        id: id.to_string(),
+        label: label.to_string(),
+        status: status.to_string(),
+        message: message.into(),
+    }
+}
+
+fn factory_reset_inner() -> Result<FactoryResetResult, String> {
+    let paths = resolve_paths()?;
+    let detected = detect_chatgpt_app()?;
+    let mut steps = Vec::new();
+
+    if detected.installed {
+        match stop_chatgpt(&detected) {
+            Ok(()) => steps.push(reset_step(
+                "stop",
+                "停止 ChatGPT",
+                "complete",
+                "已停止正在运行的 ChatGPT",
+            )),
+            Err(error) => steps.push(reset_step(
+                "stop",
+                "停止 ChatGPT",
+                "failed",
+                friendly_error(&error),
+            )),
+        }
+        if cfg!(target_os = "windows") {
+            match uninstall_chatgpt() {
+                Ok(()) => steps.push(reset_step(
+                    "uninstall",
+                    "卸载 ChatGPT",
+                    "complete",
+                    "已通过系统官方渠道卸载",
+                )),
+                Err(error) => steps.push(reset_step(
+                    "uninstall",
+                    "卸载 ChatGPT",
+                    "failed",
+                    friendly_error(&error),
+                )),
+            }
+        } else {
+            steps.push(reset_step(
+                "uninstall",
+                "卸载 ChatGPT",
+                "skipped",
+                "当前平台请手动卸载 ChatGPT",
+            ));
+        }
+    } else {
+        steps.push(reset_step(
+            "stop",
+            "停止 ChatGPT",
+            "skipped",
+            "未检测到运行中的 ChatGPT",
+        ));
+        steps.push(reset_step(
+            "uninstall",
+            "卸载 ChatGPT",
+            "skipped",
+            "ChatGPT 未安装，无需卸载",
+        ));
+    }
+
+    match clean_codex_config(&paths.codex_config_path) {
+        Ok(true) => steps.push(reset_step(
+            "config",
+            "移除 Codex 配置",
+            "complete",
+            "已从 config.toml 移除助手写入的配置",
+        )),
+        Ok(false) => steps.push(reset_step(
+            "config",
+            "移除 Codex 配置",
+            "skipped",
+            "没有需要移除的助手配置",
+        )),
+        Err(error) => steps.push(reset_step(
+            "config",
+            "移除 Codex 配置",
+            "failed",
+            friendly_error(&error),
+        )),
+    }
+
+    let data_root = assistant_data_root(&paths);
+    match remove_assistant_data(&data_root) {
+        Ok(true) => steps.push(reset_step(
+            "data",
+            "清除助手数据",
+            "complete",
+            "已删除本地状态、备份、主题和保存的 Key",
+        )),
+        Ok(false) => steps.push(reset_step(
+            "data",
+            "清除助手数据",
+            "skipped",
+            "没有可清除的助手数据",
+        )),
+        Err(error) => steps.push(reset_step(
+            "data",
+            "清除助手数据",
+            "failed",
+            friendly_error(&error),
+        )),
+    }
+
+    let uninstall_expected = detected.installed && cfg!(target_os = "windows");
+    let app_gone = !detect_chatgpt_app()?.installed;
+    let config_clean = !config_mentions_assistant(&paths.codex_config_path);
+    let data_gone = !data_root.exists();
+    let verified = config_clean && data_gone && (!uninstall_expected || app_gone);
+    steps.push(reset_step(
+        "verify",
+        "复核",
+        if verified { "complete" } else { "failed" },
+        if verified {
+            "已恢复初始状态".to_string()
+        } else {
+            "仍有项目未清理干净，请重试一键还原".to_string()
+        },
+    ));
+
+    let success = steps.iter().all(|step| step.status != "failed");
+    Ok(FactoryResetResult {
+        success,
+        summary: if success {
+            "已还原到初始状态".to_string()
+        } else {
+            "还原未完成，请查看失败步骤".to_string()
+        },
+        steps,
+    })
+}
+
+fn assistant_data_root(paths: &InstallerPaths) -> PathBuf {
+    match paths.install_root.parent() {
+        Some(parent) if parent.file_name().and_then(|name| name.to_str()) == Some("CodexAssistant") => {
+            parent.to_path_buf()
+        }
+        _ => paths.install_root.clone(),
+    }
+}
+
+fn remove_assistant_data(data_root: &Path) -> Result<bool, String> {
+    if !data_root.exists() {
+        return Ok(false);
+    }
+    fs::remove_dir_all(data_root).map_err(|error| format!("删除助手数据目录失败: {error}"))?;
+    Ok(true)
+}
+
+fn clean_codex_config(path: &Path) -> Result<bool, String> {
+    let Ok(existing) = fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    let cleaned = remove_managed_blocks(&existing);
+    if cleaned.trim() == existing.trim() {
+        return Ok(false);
+    }
+    if cleaned.trim().is_empty() {
+        fs::remove_file(path).map_err(|error| format!("删除 Codex 配置失败: {error}"))?;
+        if let Some(parent) = path.parent() {
+            // 仅在 .codex 目录已空时移除，保留用户的其他 Codex 文件
+            let _ = fs::remove_dir(parent);
+        }
+    } else {
+        fs::write(path, format!("{}\n", cleaned.trim_end()))
+            .map_err(|error| format!("重写 Codex 配置失败: {error}"))?;
+    }
+    Ok(true)
+}
+
+fn config_mentions_assistant(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .map(|content| {
+            content.contains(PROVIDER_ID)
+                || content.contains("model_catalog_json")
+                || content.contains(CONFIG_START)
+                || content.contains(LEGACY_CONFIG_START)
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn uninstall_chatgpt() -> Result<(), String> {
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$packages = @(Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue)
+if ($packages.Count -eq 0) {
+  $packages = @(Get-AppxPackage | Where-Object { $_.PackageFamilyName -like 'OpenAI.Codex_*' })
+}
+if ($packages.Count -eq 0) { throw '未找到 ChatGPT 安装包' }
+foreach ($pkg in $packages) {
+  Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop
+}
+'OK'
+"#;
+    run_command_capture(
+        "powershell.exe",
+        &["-NoProfile", "-NonInteractive", "-Command", script],
+        Duration::from_secs(180),
+    )?;
+    if wait_for_chatgpt_removed(Duration::from_secs(60)) {
+        Ok(())
+    } else {
+        Err("卸载命令已结束，但 60 秒内仍能检测到 ChatGPT".to_string())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn uninstall_chatgpt() -> Result<(), String> {
+    Err("当前平台请手动卸载 ChatGPT".to_string())
+}
+
+fn wait_for_chatgpt_removed(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if detect_chatgpt_app().map(|app| !app.installed).unwrap_or(true) {
+            return true;
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
+    detect_chatgpt_app().map(|app| !app.installed).unwrap_or(true)
 }
 
 fn collect_appearance_status() -> Result<AppearanceStatus, String> {
@@ -2566,6 +2819,7 @@ pub fn run() {
             launch_chatgpt,
             restart_chatgpt,
             restore_codex_config,
+            factory_reset,
             get_appearance_status,
             apply_appearance,
             import_theme_image
@@ -2723,6 +2977,76 @@ followUpQueueMode = "queue"
         assert!(cleaned.contains("[desktop]"));
         assert!(cleaned.contains("followUpQueueMode = \"queue\""));
         assert!(!cleaned.contains("local_ollama"));
+    }
+
+    #[test]
+    fn clean_codex_config_removes_only_managed_settings() {
+        let root = env::temp_dir().join(format!(
+            "codex-assistant-clean-test-{}-{}",
+            std::process::id(),
+            unix_timestamp()
+        ));
+        fs::create_dir_all(&root).expect("create test directory");
+        let config = root.join("config.toml");
+        fs::write(
+            &config,
+            format!(
+                r#"{CONFIG_START}
+model = "llama3.1"
+model_provider = "{PROVIDER_ID}"
+model_catalog_json = "C:/models.json"
+
+[model_providers.{PROVIDER_ID}]
+name = "Codex Assistant Router"
+base_url = "http://127.0.0.1:11434/v1"
+wire_api = "responses"
+{CONFIG_END}
+
+[profiles.keep]
+model = "gpt-5"
+"#
+            ),
+        )
+        .expect("write config");
+
+        let changed = clean_codex_config(&config).expect("clean config");
+        assert!(changed);
+        let after = fs::read_to_string(&config).expect("read cleaned config");
+        assert!(after.contains("[profiles.keep]"));
+        assert!(after.contains("model = \"gpt-5\""));
+        assert!(!after.contains(PROVIDER_ID));
+        assert!(!after.contains("model_catalog_json"));
+        assert!(!config_mentions_assistant(&config));
+
+        let changed_again = clean_codex_config(&config).expect("second clean");
+        assert!(!changed_again);
+        fs::remove_dir_all(root).expect("cleanup test directory");
+    }
+
+    #[test]
+    fn clean_codex_config_deletes_file_when_only_managed_content() {
+        let root = env::temp_dir().join(format!(
+            "codex-assistant-clean-empty-{}-{}",
+            std::process::id(),
+            unix_timestamp()
+        ));
+        fs::create_dir_all(&root).expect("create test directory");
+        let config = root.join("config.toml");
+        fs::write(
+            &config,
+            format!(
+                "model = \"llama3.1\"\nmodel_provider = \"{PROVIDER_ID}\"\n\n[model_providers.{PROVIDER_ID}]\nbase_url = \"http://127.0.0.1:11434/v1\"\n"
+            ),
+        )
+        .expect("write config");
+
+        let changed = clean_codex_config(&config).expect("clean config");
+        assert!(changed);
+        assert!(!config.exists());
+
+        let missing = clean_codex_config(&config).expect("clean missing config");
+        assert!(!missing);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

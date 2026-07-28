@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Codex 助手</title>
     <link rel="icon" href="./assets/codex-assistant-icon-32.png" />
-    <link rel="stylesheet" href="./styles.css?v=0.8.5" />
+    <link rel="stylesheet" href="./styles.css?v=0.8.7" />
   </head>
   <body>
     <div class="app-frame">
@@ -35,7 +35,7 @@
 
         <div class="sidebar-footer">
           <div class="trust-mark"><span class="icon" data-icon="shieldCheck"></span>本地配置 · 凭证加密</div>
-          <span id="versionLabel">Codex 助手 0.8.5</span>
+          <span id="versionLabel">Codex 助手 0.8.7</span>
         </div>
       </aside>
 
@@ -272,6 +272,18 @@
             <button id="diagnosticCopyButton" class="secondary-button" type="button"><span class="icon" data-icon="copy"></span><span>复制诊断信息</span></button>
             <button id="diagnosticRestoreButton" class="secondary-button" type="button" disabled><span class="icon" data-icon="rotateCcw"></span><span>恢复上次配置</span></button>
           </div>
+          <section class="danger-zone" aria-labelledby="dangerZoneTitle">
+            <div class="danger-zone-head">
+              <div>
+                <h2 id="dangerZoneTitle">危险操作</h2>
+                <p>一键还原会停止并卸载 ChatGPT，移除 Codex 配置，并删除助手的全部本地数据（含备份、主题和已保存的 Key），恢复到首次使用前的状态。</p>
+              </div>
+              <button id="factoryResetButton" class="secondary-button danger" type="button">
+                <span class="icon" data-icon="trash"></span><span>一键还原</span>
+              </button>
+            </div>
+            <div id="resetResult" class="reset-result hidden"></div>
+          </section>
         </section>
 
         <section id="appearanceView" class="view" data-view-panel="appearance">
@@ -329,6 +341,6 @@
         </div>
       </section>
     </div>
-    <script type="module" src="./main.js?v=0.8.5"></script>
+    <script type="module" src="./main.js?v=0.8.7"></script>
   </body>
 </html>

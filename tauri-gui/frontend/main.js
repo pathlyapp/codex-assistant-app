@@ -28,6 +28,7 @@ const ICONS = {
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/></svg>',
   shieldCheck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/><path d="m9 12 2 2 4-4"/></svg>',
   terminal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>',
 };
 
 const TASKS = [
@@ -50,6 +51,7 @@ const state = {
   status: null,
   running: false,
   installingApp: false,
+  resetting: false,
   currentView: "overview",
   tasks: {},
   messages: {},
@@ -116,6 +118,7 @@ function bindUi() {
   $("#copyLogButton").addEventListener("click", copyLog);
   $("#exportLogButton").addEventListener("click", exportLog);
   $("#diagnosticCopyButton").addEventListener("click", copyDiagnostics);
+  $("#factoryResetButton").addEventListener("click", factoryReset);
   $$(".theme-card:not(:disabled)").forEach((button) =>
     button.addEventListener("click", () => selectAppearance(button.dataset.theme)),
   );
@@ -152,7 +155,7 @@ function navigate(view) {
 }
 
 async function refreshStatus({ hydrateForm = false } = {}) {
-  if (!tauri?.core || state.running || state.installingApp) return;
+  if (!tauri?.core || state.running || state.installingApp || state.resetting) return;
   const button = $("#refreshButton");
   button.disabled = true;
   button.classList.add("spinning");
@@ -181,7 +184,13 @@ function renderSystemStatus(status) {
     if (!status.appInstalled) missing.push("ChatGPT");
     if (!status.configPresent) missing.push("Codex 配置");
     if (!status.routerReachable) missing.push("Router 连接");
-    setReadiness("attention", "还需要完成配置", `待处理：${missing.join("、") || "重新检查状态"}`, "开始配置");
+    const installFirst = !status.appInstalled && status.platform === "Windows";
+    setReadiness(
+      "attention",
+      "还需要完成配置",
+      `待处理：${missing.join("、") || "重新检查状态"}`,
+      installFirst ? "安装并配置" : "开始配置",
+    );
   }
   $("#overviewAction").disabled = false;
   const overall = $("#overallStatusBadge");
@@ -263,9 +272,13 @@ function hydrateRouterForm(status) {
 function onOverviewAction() {
   if (state.status?.ready) {
     openChatGPT();
-  } else {
-    navigate("setup");
+    return;
   }
+  if (state.status && !state.status.appInstalled && state.status.platform === "Windows") {
+    installChatGPT({ continueToSetup: true });
+    return;
+  }
+  navigate("setup");
 }
 
 function applyPreset(preset) {
@@ -587,27 +600,38 @@ function setUiRunning(running) {
   $("#refreshButton").classList.toggle("hidden", running);
 }
 
-async function installChatGPT() {
+async function installChatGPT({ continueToSetup = false } = {}) {
   if (!tauri?.core || state.running || state.installingApp) return;
   const confirmed = await requestConfirmation({
     title: "下载并安装 ChatGPT？",
-    message: "助手将调用 Microsoft Store 官方安装渠道下载并安装 ChatGPT，过程可能需要几分钟，期间可能出现系统确认窗口。",
-    confirmLabel: "开始安装",
+    message: continueToSetup
+      ? "助手将先通过 Microsoft Store 官方渠道下载并安装 ChatGPT（可能需要几分钟，期间可能出现系统确认窗口），完成后继续服务配置。"
+      : "助手将调用 Microsoft Store 官方安装渠道下载并安装 ChatGPT，过程可能需要几分钟，期间可能出现系统确认窗口。",
+    confirmLabel: continueToSetup ? "安装并配置" : "开始安装",
   });
   if (!confirmed) return;
   state.installingApp = true;
+  $("#overviewAction").disabled = true;
+  if (continueToSetup) {
+    setReadiness("loading", "正在下载并安装 ChatGPT", "正在调用 Microsoft Store 官方渠道，请留意系统确认窗口。", "请稍候");
+  }
   renderAppInstallState();
   try {
     const status = await tauri.core.invoke("install_chatgpt_app");
     state.status = status;
     renderSystemStatus(status);
     showToast("ChatGPT 已通过官方渠道安装");
+    if (continueToSetup) navigate("setup");
   } catch (error) {
     setStatusCard("app", false, "ChatGPT 安装未完成", friendlyError(error));
+    if (continueToSetup) {
+      setReadiness("attention", "还需要完成配置", "ChatGPT 安装未完成，可点击重试安装。", "安装并配置");
+    }
     showToast(friendlyError(error), true);
   } finally {
     state.installingApp = false;
     renderAppInstallState();
+    $("#overviewAction").disabled = false;
   }
 }
 
@@ -692,6 +716,77 @@ async function restoreConfiguration() {
       button.disabled = false;
     });
   }
+}
+
+async function factoryReset() {
+  if (!tauri?.core || state.running || state.installingApp || state.resetting) return;
+  const confirmed = await requestConfirmation({
+    title: "一键还原到初始状态？",
+    message: "将停止并卸载 ChatGPT，移除 Codex 配置，并删除助手的全部本地数据（含备份、主题和已保存的 Key）。此操作不可撤销。",
+    confirmLabel: "卸载并还原",
+    danger: true,
+  });
+  if (!confirmed) return;
+  state.resetting = true;
+  renderResetRunning();
+  try {
+    const result = await tauri.core.invoke("factory_reset");
+    renderResetResult(result);
+    showToast(result.summary, !result.success);
+  } catch (error) {
+    renderResetResult({ success: false, summary: friendlyError(error), steps: [] });
+    showToast(friendlyError(error), true);
+  } finally {
+    state.resetting = false;
+    renderResetIdle();
+    state.formDirty = false;
+    refreshStatus({ hydrateForm: true });
+  }
+}
+
+function renderResetRunning() {
+  const button = $("#factoryResetButton");
+  button.disabled = true;
+  button.querySelector(".icon").innerHTML = ICONS.loader;
+  button.querySelector(".icon").classList.add("spin");
+  button.querySelector("span:last-child").textContent = "正在还原…";
+  $("#resetResult").classList.add("hidden");
+}
+
+function renderResetIdle() {
+  const button = $("#factoryResetButton");
+  button.disabled = false;
+  button.querySelector(".icon").innerHTML = ICONS.trash;
+  button.querySelector(".icon").classList.remove("spin");
+  button.querySelector("span:last-child").textContent = "一键还原";
+}
+
+function renderResetResult(result) {
+  const box = $("#resetResult");
+  box.replaceChildren();
+  (result.steps || []).forEach((step) => {
+    const row = document.createElement("div");
+    const icon = document.createElement("span");
+    icon.className = `icon ${step.status === "failed" ? "fail" : step.status === "skipped" ? "skip" : "ok"}`;
+    icon.innerHTML = step.status === "failed" ? ICONS.alert : step.status === "skipped" ? ICONS.circle : ICONS.check;
+    const message = document.createElement("span");
+    message.className = "msg";
+    message.textContent = `${step.label}：${step.message}`;
+    const stateLabel = document.createElement("strong");
+    stateLabel.className = step.status === "failed" ? "fail" : step.status === "skipped" ? "skip" : "ok";
+    stateLabel.textContent = { complete: "已完成", skipped: "已跳过", failed: "失败" }[step.status] || step.status;
+    row.append(icon, message, stateLabel);
+    box.append(row);
+  });
+  if (!(result.steps || []).length) {
+    const row = document.createElement("div");
+    const message = document.createElement("span");
+    message.className = "msg fail";
+    message.textContent = result.summary || "还原未完成";
+    row.append(message);
+    box.append(row);
+  }
+  box.classList.remove("hidden");
 }
 
 async function refreshAppearanceStatus() {
@@ -853,7 +948,7 @@ async function copyDiagnostics() {
   if (!state.status) return showToast("请先运行诊断", true);
   const status = state.status;
   const text = [
-    `Codex Assistant: 0.8.5`,
+    `Codex Assistant: 0.8.7`,
     `Platform: ${status.platform}`,
     `ChatGPT: ${status.appInstalled ? "installed" : "missing"} (${status.appDetail})`,
     `Codex config: ${status.configPresent ? "valid" : "missing"}`,
@@ -881,11 +976,13 @@ function showToast(message, error = false) {
   }, 3000);
 }
 
-function requestConfirmation({ title, message, confirmLabel = "确认" }) {
+function requestConfirmation({ title, message, confirmLabel = "确认", danger = false }) {
   if (state.confirmResolver) closeConfirmation(false);
   $("#confirmTitle").textContent = title;
   $("#confirmMessage").textContent = message;
   $("#confirmAcceptButton").textContent = confirmLabel;
+  $("#confirmIcon").classList.toggle("danger", danger);
+  $("#confirmAcceptButton").classList.toggle("danger", danger);
   $("#confirmOverlay").classList.remove("hidden");
   window.setTimeout(() => $("#confirmAcceptButton").focus(), 0);
   return new Promise((resolve) => {
