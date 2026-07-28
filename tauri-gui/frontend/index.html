@@ -45,9 +45,12 @@
             <h1 id="pageTitle">首页</h1>
             <p id="pageSubtitle">确认 ChatGPT 与 Codex 服务状态</p>
           </div>
-          <button id="refreshButton" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
-            <span class="icon" data-icon="refresh"></span>
-          </button>
+          <div class="topbar-actions">
+            <button id="applyAppearanceButton" class="primary-button hidden" type="button">应用并重启 ChatGPT</button>
+            <button id="refreshButton" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
+              <span class="icon" data-icon="refresh"></span>
+            </button>
+          </div>
         </header>
 
         <div id="offlineBanner" class="banner warning hidden">
@@ -426,7 +429,6 @@
           </div>
           <div class="appearance-actions">
             <span>应用主题会重启 ChatGPT，请先保存尚未发送的内容。</span>
-            <button id="applyAppearanceButton" class="primary-button" type="button">应用并重启 ChatGPT</button>
           </div>
         </section>
 

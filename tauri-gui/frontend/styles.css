@@ -237,6 +237,12 @@ select:disabled {
   font-size: 12px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .icon-button,
 .inline-icon-button {
   display: inline-flex;
@@ -1780,10 +1786,7 @@ select:disabled {
 
 .appearance-actions {
   display: flex;
-  min-height: 66px;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
   margin-top: 12px;
   padding: 12px 0;
 }

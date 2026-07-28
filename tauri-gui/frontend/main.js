@@ -217,7 +217,7 @@ function navigate(view) {
   const [title, subtitle] = VIEW_COPY[view];
   $("#pageTitle").textContent = title;
   $("#pageSubtitle").textContent = subtitle;
-  $("#refreshButton").classList.toggle("hidden", view === "appearance" || state.running);
+  updateTopbarActions();
   if (view === "appearance") {
     refreshAppearanceStatus();
     loadPresetThemes();
@@ -964,11 +964,17 @@ function showSetupForm() {
   navigate("setup");
 }
 
+function updateTopbarActions() {
+  const onAppearance = state.currentView === "appearance";
+  $("#refreshButton").classList.toggle("hidden", onAppearance || state.running);
+  $("#applyAppearanceButton").classList.toggle("hidden", !onAppearance);
+}
+
 function setUiRunning(running) {
   $$(".nav-item").forEach((button) => {
     if (button.dataset.view !== "setup") button.disabled = running;
   });
-  $("#refreshButton").classList.toggle("hidden", running);
+  updateTopbarActions();
 }
 
 async function installChatGPT({ continueToSetup = false } = {}) {
