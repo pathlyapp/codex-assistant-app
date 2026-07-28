@@ -20,7 +20,7 @@ use std::io::Read;
 
 mod token_support;
 
-const VERSION: &str = "0.8.4";
+const VERSION: &str = "0.8.5";
 const CONFIG_START: &str = "# >>> CodexAssistant Managed Config";
 const CONFIG_END: &str = "# <<< CodexAssistant Managed Config";
 const LEGACY_CONFIG_START: &str = "# >>> CompanyCodex Gateway PoC";
@@ -303,6 +303,13 @@ async fn start_setup(app: AppHandle, options: SetupOptions) -> Result<InstallerF
 }
 
 #[tauri::command]
+async fn install_chatgpt_app(app: AppHandle) -> Result<SystemStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || install_chatgpt_app_inner(&app))
+        .await
+        .map_err(|error| format!("安装任务失败: {error}"))?
+}
+
+#[tauri::command]
 async fn launch_chatgpt() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(launch_chatgpt_preferred)
         .await
@@ -526,6 +533,20 @@ fn preflight_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
         return Err("未检测到 ChatGPT，且未允许安装官方应用".to_string());
     }
     Ok(StageOutcome::complete("环境检查通过"))
+}
+
+fn install_chatgpt_app_inner(app: &AppHandle) -> Result<SystemStatus, String> {
+    if detect_chatgpt_app()?.installed {
+        return collect_system_status();
+    }
+    if !cfg!(target_os = "windows") {
+        return Err("当前平台请先通过 OpenAI 官方渠道安装 ChatGPT，再返回助手刷新状态".to_string());
+    }
+    install_chatgpt_with_winget(app)?;
+    if !detect_chatgpt_app()?.installed {
+        return Err("官方安装命令已结束，但系统仍未检测到 ChatGPT".to_string());
+    }
+    collect_system_status()
 }
 
 fn install_chatgpt(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOutcome, String> {
@@ -2541,6 +2562,7 @@ pub fn run() {
             get_system_status,
             discover_models,
             start_setup,
+            install_chatgpt_app,
             launch_chatgpt,
             restart_chatgpt,
             restore_codex_config,

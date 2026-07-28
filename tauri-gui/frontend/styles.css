@@ -615,6 +615,24 @@ select:disabled {
   font-size: 10px;
 }
 
+.check-row-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-row-action {
+  min-height: 30px;
+  padding: 0 11px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.check-row-action .icon {
+  width: 14px;
+  height: 14px;
+}
+
 .section-actions {
   display: flex;
   flex: 0 0 auto;

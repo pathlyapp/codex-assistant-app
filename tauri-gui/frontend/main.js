@@ -9,6 +9,7 @@ const ICONS = {
   circle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
   cpu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 14h3"/><path d="M1 9h3"/><path d="M1 14h3"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
   externalLink: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>',
   eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.06 12.35a1 1 0 0 1 0-.7C3.73 7.6 7.7 5 12 5c4.3 0 8.27 2.6 9.94 6.65a1 1 0 0 1 0 .7C20.27 16.4 16.3 19 12 19c-4.3 0-8.27-2.6-9.94-6.65"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20"/><path d="M6.71 6.71C4.77 8 3.3 9.74 2.42 11.63a1 1 0 0 0 0 .74C4.12 16.2 7.78 19 12 19c1.48 0 2.9-.35 4.17-.97"/><path d="M10.73 5.08Q11.35 5 12 5c4.22 0 7.88 2.8 9.58 6.63a1 1 0 0 1 0 .74 12.7 12.7 0 0 1-1.18 2"/><path d="M14.12 14.12a3 3 0 0 1-4.24-4.24"/></svg>',
@@ -48,6 +49,7 @@ const tauri = window.__TAURI__;
 const state = {
   status: null,
   running: false,
+  installingApp: false,
   currentView: "overview",
   tasks: {},
   messages: {},
@@ -89,6 +91,7 @@ function bindUi() {
   $("#refreshButton").addEventListener("click", () => refreshStatus());
   $("#runDiagnosticsButton").addEventListener("click", () => refreshStatus());
   $("#overviewAction").addEventListener("click", onOverviewAction);
+  $("#appInstallButton").addEventListener("click", installChatGPT);
   $("#editConfigButton").addEventListener("click", () => navigate("setup"));
   $("#restoreConfigButton").addEventListener("click", restoreConfiguration);
   $("#diagnosticRestoreButton").addEventListener("click", restoreConfiguration);
@@ -149,7 +152,7 @@ function navigate(view) {
 }
 
 async function refreshStatus({ hydrateForm = false } = {}) {
-  if (!tauri?.core || state.running) return;
+  if (!tauri?.core || state.running || state.installingApp) return;
   const button = $("#refreshButton");
   button.disabled = true;
   button.classList.add("spinning");
@@ -186,6 +189,7 @@ function renderSystemStatus(status) {
   overall.className = `status-badge ${ready ? "success" : "warning"}`;
 
   setStatusCard("app", status.appInstalled, status.appInstalled ? "ChatGPT 已安装" : "未检测到 ChatGPT", status.appDetail);
+  $("#appInstallButton").classList.toggle("hidden", status.appInstalled || status.platform !== "Windows");
   setStatusCard(
     "router",
     status.routerReachable,
@@ -232,6 +236,7 @@ function setStatusCard(prefix, ok, title, detail) {
 
 function renderStatusError(error) {
   ["app", "router", "config"].forEach((prefix) => setStatusCard(prefix, false, "检查失败", friendlyError(error)));
+  $("#appInstallButton").classList.add("hidden");
   $("#overallStatusBadge").textContent = "检查失败";
   $("#overallStatusBadge").className = "status-badge error";
 }
@@ -582,6 +587,46 @@ function setUiRunning(running) {
   $("#refreshButton").classList.toggle("hidden", running);
 }
 
+async function installChatGPT() {
+  if (!tauri?.core || state.running || state.installingApp) return;
+  const confirmed = await requestConfirmation({
+    title: "下载并安装 ChatGPT？",
+    message: "助手将调用 Microsoft Store 官方安装渠道下载并安装 ChatGPT，过程可能需要几分钟，期间可能出现系统确认窗口。",
+    confirmLabel: "开始安装",
+  });
+  if (!confirmed) return;
+  state.installingApp = true;
+  renderAppInstallState();
+  try {
+    const status = await tauri.core.invoke("install_chatgpt_app");
+    state.status = status;
+    renderSystemStatus(status);
+    showToast("ChatGPT 已通过官方渠道安装");
+  } catch (error) {
+    setStatusCard("app", false, "ChatGPT 安装未完成", friendlyError(error));
+    showToast(friendlyError(error), true);
+  } finally {
+    state.installingApp = false;
+    renderAppInstallState();
+  }
+}
+
+function renderAppInstallState() {
+  const button = $("#appInstallButton");
+  const installing = state.installingApp;
+  button.disabled = installing;
+  button.querySelector(".icon").innerHTML = installing ? ICONS.loader : ICONS.download;
+  button.querySelector(".icon").classList.toggle("spin", installing);
+  button.querySelector("span:last-child").textContent = installing ? "正在安装…" : "下载安装";
+  if (installing) {
+    $("#appStatusTitle").textContent = "正在下载并安装 ChatGPT";
+    $("#appStatusDetail").textContent = "正在调用 Microsoft Store 官方渠道，请留意系统确认窗口。";
+    const badge = $("#appStatusBadge");
+    badge.textContent = "安装中";
+    badge.className = "status-badge pending";
+  }
+}
+
 async function openChatGPT() {
   if (!tauri?.core) return;
   const button = $("#overviewAction");
@@ -808,7 +853,7 @@ async function copyDiagnostics() {
   if (!state.status) return showToast("请先运行诊断", true);
   const status = state.status;
   const text = [
-    `Codex Assistant: 0.8.4`,
+    `Codex Assistant: 0.8.5`,
     `Platform: ${status.platform}`,
     `ChatGPT: ${status.appInstalled ? "installed" : "missing"} (${status.appDetail})`,
     `Codex config: ${status.configPresent ? "valid" : "missing"}`,

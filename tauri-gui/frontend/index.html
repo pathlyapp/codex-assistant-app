@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Codex 助手</title>
     <link rel="icon" href="./assets/codex-assistant-icon-32.png" />
-    <link rel="stylesheet" href="./styles.css?v=0.8.4" />
+    <link rel="stylesheet" href="./styles.css?v=0.8.5" />
   </head>
   <body>
     <div class="app-frame">
@@ -35,7 +35,7 @@
 
         <div class="sidebar-footer">
           <div class="trust-mark"><span class="icon" data-icon="shieldCheck"></span>本地配置 · 凭证加密</div>
-          <span id="versionLabel">Codex 助手 0.8.4</span>
+          <span id="versionLabel">Codex 助手 0.8.5</span>
         </div>
       </aside>
 
@@ -80,7 +80,12 @@
                   <strong id="appStatusTitle">正在检测 ChatGPT</strong>
                   <small id="appStatusDetail">请稍候</small>
                 </div>
-                <span id="appStatusBadge" class="status-badge pending">检查中</span>
+                <div class="check-row-side">
+                  <button id="appInstallButton" class="secondary-button check-row-action hidden" type="button">
+                    <span class="icon" data-icon="download"></span><span>下载安装</span>
+                  </button>
+                  <span id="appStatusBadge" class="status-badge pending">检查中</span>
+                </div>
               </article>
               <article class="check-row" id="routerStatusCard">
                 <div class="check-row-icon"><span class="icon" data-icon="route"></span></div>
@@ -324,6 +329,6 @@
         </div>
       </section>
     </div>
-    <script type="module" src="./main.js?v=0.8.4"></script>
+    <script type="module" src="./main.js?v=0.8.5"></script>
   </body>
 </html>
