@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Codex 助手</title>
     <link rel="icon" href="./assets/codex-assistant-icon-32.png" />
-    <link rel="stylesheet" href="./styles.css?v=0.8.7" />
+    <link rel="stylesheet" href="./styles.css?v=0.8.8" />
   </head>
   <body>
     <div class="app-frame">
@@ -35,7 +35,7 @@
 
         <div class="sidebar-footer">
           <div class="trust-mark"><span class="icon" data-icon="shieldCheck"></span>本地配置 · 凭证加密</div>
-          <span id="versionLabel">Codex 助手 0.8.7</span>
+          <span id="versionLabel">Codex 助手 0.8.8</span>
         </div>
       </aside>
 
@@ -316,6 +316,21 @@
             <span>支持 PNG、JPEG、WebP，最大 8 MB；建议使用 16:9 纯背景图。</span>
             <input id="backgroundFileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
           </div>
+          <div class="art-themes-block">
+            <div class="art-themes-head">
+              <h3>精选主题</h3>
+              <span>内置 DreamSkin 画廊热门作品，按原作者许可分发</span>
+            </div>
+            <div id="presetThemeGrid" class="art-grid"></div>
+          </div>
+          <div class="art-themes-block">
+            <div class="art-themes-head">
+              <h3>在线主题库</h3>
+              <button id="galleryRefreshButton" class="ghost-button art-refresh" type="button"><span class="icon" data-icon="refresh"></span><span>刷新</span></button>
+            </div>
+            <p class="art-themes-tip">来自 dreamskin.cc 社区画廊的热门主题，按各自许可使用；首次应用需联网下载，之后离线可用。</p>
+            <div id="galleryThemeGrid" class="art-grid"></div>
+          </div>
           <div class="banner neutral appearance-note">
             <span class="icon" data-icon="info"></span>
             <span id="appearanceMessage">主题只在从助手启动的 ChatGPT 会话中生效，可随时恢复官方外观。</span>
@@ -341,6 +356,6 @@
         </div>
       </section>
     </div>
-    <script type="module" src="./main.js?v=0.8.7"></script>
+    <script type="module" src="./main.js?v=0.8.8"></script>
   </body>
 </html>

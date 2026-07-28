@@ -4,6 +4,11 @@ All notable changes to Codex Assistant are documented in this file.
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-07-28
+
+- Integrated DreamSkin gallery themes into the appearance page: three bundled preset themes (悟空 WUKONG, firefly, 保险柜 办公室 卡通, redistributed under MIT/CC BY with attribution) plus an online popular-theme library fetched from dreamskin.cc with hash-verified downloads, per-theme licensing display, and offline reuse after first apply.
+- Reworked theme injection to render CSS from each theme's color palette and artwork focus instead of a single fixed template, while keeping official, focus, and custom-image modes unchanged.
+
 ## [0.8.7] - 2026-07-28
 
 - The overview primary action now installs ChatGPT first when it is missing, then continues into Router setup, so "开始配置" no longer requires filling the form before the app is present.

@@ -65,6 +65,11 @@ const state = {
   selectedAppearance: "official",
   customThemeReady: false,
   appearanceRequestId: 0,
+  presets: [],
+  presetsLoading: false,
+  gallery: [],
+  galleryState: "idle",
+  galleryError: "",
   confirmResolver: null,
 };
 
@@ -125,6 +130,7 @@ function bindUi() {
   $("#chooseBackgroundButton").addEventListener("click", () => $("#backgroundFileInput").click());
   $("#backgroundFileInput").addEventListener("change", importBackgroundImage);
   $("#applyAppearanceButton").addEventListener("click", applyAppearance);
+  $("#galleryRefreshButton").addEventListener("click", () => loadGalleryThemes({ force: true }));
   $("#confirmCancelButton").addEventListener("click", () => closeConfirmation(false));
   $("#confirmAcceptButton").addEventListener("click", () => closeConfirmation(true));
   $("#confirmOverlay").addEventListener("click", (event) => {
@@ -151,7 +157,11 @@ function navigate(view) {
   $("#pageTitle").textContent = title;
   $("#pageSubtitle").textContent = subtitle;
   $("#refreshButton").classList.toggle("hidden", view === "appearance" || state.running);
-  if (view === "appearance") refreshAppearanceStatus();
+  if (view === "appearance") {
+    refreshAppearanceStatus();
+    loadPresetThemes();
+    loadGalleryThemes();
+  }
 }
 
 async function refreshStatus({ hydrateForm = false } = {}) {
@@ -832,6 +842,115 @@ function renderAppearanceSelection() {
   $("#applyAppearanceButton").disabled = state.selectedAppearance === "custom" && !state.customThemeReady;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
+}
+
+function themeDisplayName(themeId) {
+  if (themeId === "official") return "官方外观";
+  if (themeId === "focus") return "专注深色";
+  if (themeId === "custom") return "自定义背景";
+  const preset = state.presets.find((item) => item.id === themeId);
+  if (preset) return preset.name;
+  const gallery = state.gallery.find((item) => `gallery:${item.versionId}` === themeId);
+  if (gallery) return gallery.name;
+  return themeId;
+}
+
+async function loadPresetThemes() {
+  if (!tauri?.core || state.presetsLoading || state.presets.length) return;
+  state.presetsLoading = true;
+  try {
+    state.presets = await tauri.core.invoke("list_preset_themes");
+    renderPresetThemes();
+  } catch (error) {
+    $("#presetThemeGrid").innerHTML = `<p class="art-grid-note">${escapeHtml(friendlyError(error))}</p>`;
+  } finally {
+    state.presetsLoading = false;
+  }
+}
+
+function safeCssColor(value, fallback) {
+  const text = String(value || "").trim();
+  const valid = /^#[0-9a-fA-F]{3,8}$/.test(text) || /^(rgb|hsl)a?\([0-9.,%\s]+\)$/.test(text);
+  return valid ? text : fallback;
+}
+
+function renderPresetThemes() {
+  const grid = $("#presetThemeGrid");
+  grid.innerHTML = "";
+  state.presets.forEach((preset) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "theme-card art-card";
+    card.dataset.theme = preset.id;
+    card.innerHTML = `
+      <span class="art-preview"></span>
+      <span><strong>${escapeHtml(preset.name)}</strong><small>${escapeHtml(preset.author)} · ${escapeHtml(preset.license)}</small></span>
+      <span class="theme-check icon" data-icon="check"></span>`;
+    card.querySelector(".art-preview").style.backgroundImage = `url(${JSON.stringify(preset.previewDataUrl)})`;
+    card.addEventListener("click", () => selectAppearance(preset.id));
+    grid.appendChild(card);
+  });
+  hydrateIcons();
+  renderAppearanceSelection();
+}
+
+async function loadGalleryThemes({ force = false } = {}) {
+  if (!tauri?.core || state.galleryState === "loading") return;
+  if (!force && state.galleryState === "ready") return;
+  state.galleryState = "loading";
+  state.galleryError = "";
+  renderGalleryThemes();
+  try {
+    state.gallery = await tauri.core.invoke("list_gallery_themes");
+    state.galleryState = "ready";
+  } catch (error) {
+    state.galleryState = "error";
+    state.galleryError = friendlyError(error);
+  }
+  renderGalleryThemes();
+}
+
+function renderGalleryThemes() {
+  const grid = $("#galleryThemeGrid");
+  const refreshButton = $("#galleryRefreshButton");
+  refreshButton.disabled = state.galleryState === "loading";
+  if (state.galleryState === "loading") {
+    grid.innerHTML = `<p class="art-grid-note">正在从 dreamskin.cc 加载热门主题…</p>`;
+    return;
+  }
+  if (state.galleryState === "error") {
+    grid.innerHTML = `<p class="art-grid-note">${escapeHtml(state.galleryError || "加载失败")}，可点击右上角“刷新”重试。</p>`;
+    return;
+  }
+  if (!state.gallery.length) {
+    grid.innerHTML = `<p class="art-grid-note">进入本页后自动加载热门主题。</p>`;
+    return;
+  }
+  grid.innerHTML = "";
+  state.gallery.forEach((theme) => {
+    const colors = theme.colors || {};
+    const from = safeCssColor(colors.accent, "#8095a5");
+    const to = safeCssColor(colors.background, theme.appearance === "light" ? "#f2f2f0" : "#0b1118");
+    const size = theme.packageBytes ? ` · ${(theme.packageBytes / 1024 / 1024).toFixed(1)} MB` : "";
+    const downloaded = theme.downloaded ? `<em class="art-badge">已下载</em>` : "";
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "theme-card art-card";
+    card.dataset.theme = `gallery:${theme.versionId}`;
+    card.innerHTML = `
+      <span class="art-preview"></span>
+      <span><strong>${escapeHtml(theme.name)}${downloaded}</strong><small>${escapeHtml(theme.author)} · ${escapeHtml(theme.license)} · ${theme.downloads} 次下载${size}</small></span>
+      <span class="theme-check icon" data-icon="check"></span>`;
+    card.querySelector(".art-preview").style.backgroundImage = `linear-gradient(135deg, ${from}, ${to})`;
+    card.addEventListener("click", () => selectAppearance(card.dataset.theme));
+    grid.appendChild(card);
+  });
+  hydrateIcons();
+  renderAppearanceSelection();
+}
+
 async function importBackgroundImage(event) {
   const input = event.currentTarget;
   const file = input.files?.[0];
@@ -878,24 +997,35 @@ function readFileAsDataUrl(file) {
 
 async function applyAppearance() {
   if (!tauri?.core || !state.selectedAppearance) return;
+  const themeName = themeDisplayName(state.selectedAppearance);
+  const galleryTheme = state.selectedAppearance.startsWith("gallery:")
+    ? state.gallery.find((item) => `gallery:${item.versionId}` === state.selectedAppearance)
+    : null;
+  const needsDownload = galleryTheme && !galleryTheme.downloaded;
   const confirmed = await requestConfirmation({
-    title: state.selectedAppearance === "official" ? "恢复官方外观？" : state.selectedAppearance === "custom" ? "应用自定义背景？" : "应用专注外观？",
+    title: state.selectedAppearance === "official" ? "恢复官方外观？" : `应用主题「${themeName}」？`,
     message:
       state.selectedAppearance === "official"
         ? "恢复官方外观需要重新启动 ChatGPT。请先保存尚未发送的内容。"
-        : "应用外观需要重新启动 ChatGPT。请先保存尚未发送的内容。",
+        : needsDownload
+          ? `将先从 dreamskin.cc 下载该主题（约 ${(galleryTheme.packageBytes / 1024 / 1024).toFixed(1)} MB，许可：${galleryTheme.license}），然后重启 ChatGPT 应用。请先保存尚未发送的内容。`
+          : "应用外观需要重新启动 ChatGPT。请先保存尚未发送的内容。",
     confirmLabel: "应用并重启",
   });
   if (!confirmed) return;
   state.appearanceRequestId += 1;
   const button = $("#applyAppearanceButton");
   button.disabled = true;
-  button.textContent = "正在重启并应用…";
+  button.textContent = needsDownload ? "正在下载并应用…" : "正在重启并应用…";
   const badge = $("#appearanceStatus");
   badge.textContent = "应用中";
   badge.className = "status-badge warning";
   try {
     const appearance = await tauri.core.invoke("apply_appearance", { theme: state.selectedAppearance });
+    if (galleryTheme) {
+      galleryTheme.downloaded = true;
+      renderGalleryThemes();
+    }
     badge.textContent = appearance.active ? "已生效" : "官方外观";
     badge.className = "status-badge success";
     $("#appearanceMessage").textContent = appearance.message;
@@ -948,7 +1078,7 @@ async function copyDiagnostics() {
   if (!state.status) return showToast("请先运行诊断", true);
   const status = state.status;
   const text = [
-    `Codex Assistant: 0.8.7`,
+    `Codex Assistant: 0.8.8`,
     `Platform: ${status.platform}`,
     `ChatGPT: ${status.appInstalled ? "installed" : "missing"} (${status.appDetail})`,
     `Codex config: ${status.configPresent ? "valid" : "missing"}`,

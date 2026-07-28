@@ -1559,6 +1559,93 @@ select:disabled {
   line-height: 1.5;
 }
 
+.art-themes-block {
+  margin-top: 20px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.art-themes-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.art-themes-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.art-themes-head > span {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.art-refresh {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.art-themes-tip {
+  margin: 0 0 10px;
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.art-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.art-grid-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 14px 4px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.art-card {
+  padding: 8px;
+}
+
+.art-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background-color: var(--surface-hover);
+  background-position: center;
+  background-size: cover;
+}
+
+.art-card strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.art-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(70, 130, 103, 0.14);
+  color: #3d7a5f;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 600;
+}
+
 .appearance-actions {
   display: flex;
   min-height: 66px;

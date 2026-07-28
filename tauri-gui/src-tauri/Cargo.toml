@@ -1,6 +1,6 @@
 [package]
 name = "company-codex-tauri-gui"
-version = "0.8.7"
+version = "0.8.8"
 description = "Codex Assistant"
 edition = "2021"
 
@@ -15,9 +15,11 @@ tauri-build = { version = "2", features = [] }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 tungstenite = "0.30"
 toml_edit = "0.25"
 ureq = { version = "2.12", features = ["json"] }
 url = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }

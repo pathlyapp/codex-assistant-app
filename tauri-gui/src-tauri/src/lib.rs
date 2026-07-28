@@ -10,17 +10,17 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
 use url::Url;
 
-#[cfg(target_os = "windows")]
-use std::io::Read;
+use std::io::{Cursor, Read};
 
 mod token_support;
 
-const VERSION: &str = "0.8.7";
+const VERSION: &str = "0.8.8";
 const CONFIG_START: &str = "# >>> CodexAssistant Managed Config";
 const CONFIG_END: &str = "# <<< CodexAssistant Managed Config";
 const LEGACY_CONFIG_START: &str = "# >>> CompanyCodex Gateway PoC";
@@ -33,6 +33,11 @@ const APPEARANCE_PORT: u16 = 9335;
 const MAX_THEME_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_THEME_IMAGE_DIMENSION: u32 = 16_384;
 const MAX_THEME_IMAGE_PIXELS: u64 = 50_000_000;
+const GALLERY_API_BASE: &str = "https://api.dreamskin.cc";
+const GALLERY_LIST_LIMIT: usize = 24;
+const MAX_GALLERY_PACKAGE_BYTES: u64 = 48 * 1024 * 1024;
+const MAX_GALLERY_ZIP_ENTRIES: usize = 64;
+const MAX_GALLERY_STORED: usize = 12;
 const WINDOWS_SETUP_PROBE: &str = r#"(() => {
   const text = document.body?.innerText || '';
   return {
@@ -169,6 +174,209 @@ struct ThemeImageInfo {
     height: u32,
     imported_at: String,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct ArtColors {
+    background: String,
+    panel: String,
+    panel_alt: String,
+    accent: String,
+    highlight: String,
+    text: String,
+    muted: String,
+    line: String,
+}
+
+impl Default for ArtColors {
+    fn default() -> Self {
+        Self {
+            background: "#0b1118".to_string(),
+            panel: "#151c25".to_string(),
+            panel_alt: "#202a35".to_string(),
+            accent: "#8095a5".to_string(),
+            highlight: "#a4b4c0".to_string(),
+            text: "#f4f7fb".to_string(),
+            muted: "#9aa5ad".to_string(),
+            line: "#3f3f3f".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct ArtThemeMeta {
+    name: String,
+    author: String,
+    license: String,
+    appearance: String,
+    focus_x: f64,
+    focus_y: f64,
+    colors: ArtColors,
+    stored_file: String,
+    mime: String,
+}
+
+impl Default for ArtThemeMeta {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            author: String::new(),
+            license: String::new(),
+            appearance: "dark".to_string(),
+            focus_x: 0.5,
+            focus_y: 0.5,
+            colors: ArtColors::default(),
+            stored_file: String::new(),
+            mime: "image/jpeg".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresetThemeInfo {
+    id: String,
+    name: String,
+    author: String,
+    license: String,
+    appearance: String,
+    colors: ArtColors,
+    preview_data_url: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GalleryThemeInfo {
+    version_id: String,
+    theme_id: String,
+    name: String,
+    author: String,
+    license: String,
+    downloads: u64,
+    package_bytes: u64,
+    appearance: Option<String>,
+    colors: Option<ArtColors>,
+    downloaded: bool,
+}
+
+struct PreparedTheme {
+    attr: String,
+    css: String,
+    image_data_url: Option<String>,
+}
+
+struct ResolvedArt {
+    attr: String,
+    meta: ArtThemeMeta,
+    bytes: Vec<u8>,
+}
+
+struct ArtPreset {
+    slug: &'static str,
+    name: &'static str,
+    author: &'static str,
+    license: &'static str,
+    appearance: &'static str,
+    focus_x: f64,
+    focus_y: f64,
+    mime: &'static str,
+    bytes: &'static [u8],
+    colors: ArtPalette,
+}
+
+#[derive(Clone, Copy)]
+struct ArtPalette {
+    background: &'static str,
+    panel: &'static str,
+    panel_alt: &'static str,
+    accent: &'static str,
+    highlight: &'static str,
+    text: &'static str,
+    muted: &'static str,
+    line: &'static str,
+}
+
+impl From<ArtPalette> for ArtColors {
+    fn from(palette: ArtPalette) -> Self {
+        Self {
+            background: palette.background.to_string(),
+            panel: palette.panel.to_string(),
+            panel_alt: palette.panel_alt.to_string(),
+            accent: palette.accent.to_string(),
+            highlight: palette.highlight.to_string(),
+            text: palette.text.to_string(),
+            muted: palette.muted.to_string(),
+            line: palette.line.to_string(),
+        }
+    }
+}
+
+static ART_PRESETS: &[ArtPreset] = &[
+    ArtPreset {
+        slug: "wukong",
+        name: "悟空 WUKONG",
+        author: "JamesOpsLab",
+        license: "MIT",
+        appearance: "dark",
+        focus_x: 0.0,
+        focus_y: 0.5,
+        mime: "image/webp",
+        bytes: include_bytes!("../presets/wukong.webp"),
+        colors: ArtPalette {
+            background: "#131313",
+            panel: "#1d1e1d",
+            panel_alt: "#2a2a2a",
+            accent: "#f6c696",
+            highlight: "#f8d4b0",
+            text: "#f0f0f0",
+            muted: "#939393",
+            line: "#3f3f3f",
+        },
+    },
+    ArtPreset {
+        slug: "firefly",
+        name: "firefly",
+        author: "1xifengdeyouxi",
+        license: "MIT",
+        appearance: "light",
+        focus_x: 0.37,
+        focus_y: 0.5,
+        mime: "image/jpeg",
+        bytes: include_bytes!("../presets/firefly.jpg"),
+        colors: ArtPalette {
+            background: "#2d507f",
+            panel: "#c4d8da",
+            panel_alt: "#e9eaea",
+            accent: "#9b850c",
+            highlight: "#746409",
+            text: "#1c1c1d",
+            muted: "#696969",
+            line: "#d3d3d3",
+        },
+    },
+    ArtPreset {
+        slug: "vault-office",
+        name: "保险柜 办公室 卡通",
+        author: "陆健辉",
+        license: "CC BY 4.0",
+        appearance: "dark",
+        focus_x: 0.28,
+        focus_y: 0.5,
+        mime: "image/jpeg",
+        bytes: include_bytes!("../presets/vault-office.jpg"),
+        colors: ArtPalette {
+            background: "#131313",
+            panel: "#1e1e1d",
+            panel_alt: "#2b2b2a",
+            accent: "#d04f37",
+            highlight: "#dc7b69",
+            text: "#f0f0ef",
+            muted: "#939393",
+            line: "#3f3f3f",
+        },
+    },
+];
 
 #[derive(Clone, Debug, Serialize)]
 struct InstallerFinished {
@@ -373,6 +581,20 @@ async fn import_theme_image(request: ThemeImageRequest) -> Result<AppearanceStat
     tauri::async_runtime::spawn_blocking(move || import_theme_image_inner(&request))
         .await
         .map_err(|error| format!("导入主题图片任务失败: {error}"))?
+}
+
+#[tauri::command]
+async fn list_preset_themes() -> Result<Vec<PresetThemeInfo>, String> {
+    tauri::async_runtime::spawn_blocking(list_preset_themes_inner)
+        .await
+        .map_err(|error| format!("读取内置主题任务失败: {error}"))?
+}
+
+#[tauri::command]
+async fn list_gallery_themes() -> Result<Vec<GalleryThemeInfo>, String> {
+    tauri::async_runtime::spawn_blocking(list_gallery_themes_inner)
+        .await
+        .map_err(|error| format!("读取在线主题库任务失败: {error}"))?
 }
 
 fn collect_system_status() -> Result<SystemStatus, String> {
@@ -916,8 +1138,9 @@ fn launch_chatgpt_preferred() -> Result<(), String> {
     let paths = resolve_paths()?;
     let appearance = read_appearance_state(&paths).ok();
     if let Some(state) = appearance.as_ref() {
-        if matches!(state.selected_theme.as_str(), "focus" | "custom") {
-            return apply_appearance_inner(&state.selected_theme).map(|_| ());
+        let theme = state.selected_theme.as_str();
+        if matches!(theme, "focus" | "custom") || is_art_theme(theme) {
+            return apply_appearance_with_download(theme, false).map(|_| ());
         }
     }
     launch_chatgpt_inner()
@@ -1305,6 +1528,8 @@ fn collect_appearance_status() -> Result<AppearanceStatus, String> {
     });
     let custom_theme = read_custom_theme(&paths).ok();
     let custom_theme_ready = custom_theme.is_some();
+    let art_ready = !is_art_theme(&state.selected_theme)
+        || resolve_art_theme(&paths, &state.selected_theme, false).is_ok();
     let active = state.selected_theme != "official"
         && fetch_cdp_targets(state.port)
             .map(|targets| !targets.is_empty())
@@ -1315,6 +1540,8 @@ fn collect_appearance_status() -> Result<AppearanceStatus, String> {
         "当前使用 ChatGPT 官方外观".to_string()
     } else if state.selected_theme == "custom" && !custom_theme_ready {
         "自定义背景文件缺失，请重新选择图片".to_string()
+    } else if !art_ready {
+        "主题文件缺失，请在外观页重新应用该主题".to_string()
     } else if active {
         "主题已在本次 ChatGPT 会话中生效".to_string()
     } else {
@@ -1333,7 +1560,11 @@ fn collect_appearance_status() -> Result<AppearanceStatus, String> {
 }
 
 fn apply_appearance_inner(theme: &str) -> Result<AppearanceStatus, String> {
-    if !matches!(theme, "official" | "focus" | "custom") {
+    apply_appearance_with_download(theme, true)
+}
+
+fn apply_appearance_with_download(theme: &str, allow_download: bool) -> Result<AppearanceStatus, String> {
+    if !matches!(theme, "official" | "focus" | "custom") && !is_art_theme(theme) {
         return Err("不支持的主题".to_string());
     }
     if !cfg!(any(target_os = "windows", target_os = "macos")) {
@@ -1346,10 +1577,10 @@ fn apply_appearance_inner(theme: &str) -> Result<AppearanceStatus, String> {
     let paths = resolve_paths()?;
     fs::create_dir_all(&paths.install_root)
         .map_err(|error| format!("创建外观状态目录失败: {error}"))?;
-    let custom_data_url = if theme == "custom" {
-        Some(custom_theme_data_url(&paths)?)
-    } else {
+    let prepared = if theme == "official" {
         None
+    } else {
+        Some(prepare_theme(&paths, theme, allow_download)?)
     };
 
     if theme == "official" {
@@ -1366,6 +1597,7 @@ fn apply_appearance_inner(theme: &str) -> Result<AppearanceStatus, String> {
         return collect_appearance_status();
     }
 
+    let prepared = prepared.expect("non-official theme must be prepared");
     stop_chatgpt(&app)?;
     thread::sleep(Duration::from_millis(700));
     let port = select_appearance_port()?;
@@ -1373,7 +1605,7 @@ fn apply_appearance_inner(theme: &str) -> Result<AppearanceStatus, String> {
         .and_then(|_| wait_for_cdp_targets(port, Duration::from_secs(45)))
         .and_then(|targets| {
             validate_cdp_owner(port, &app)?;
-            inject_theme_into_targets(theme, port, &targets, custom_data_url.as_deref())
+            inject_theme_into_targets(&prepared, port, &targets)
         })
     {
         let _ = stop_chatgpt(&app);
@@ -1542,6 +1774,629 @@ fn custom_theme_data_url(paths: &InstallerPaths) -> Result<String, String> {
         info.mime_type,
         BASE64_STANDARD.encode(bytes)
     ))
+}
+
+fn is_art_theme(theme: &str) -> bool {
+    theme.starts_with("preset:") || theme.starts_with("gallery:")
+}
+
+fn prepare_theme(paths: &InstallerPaths, theme: &str, allow_download: bool) -> Result<PreparedTheme, String> {
+    match theme {
+        "focus" => Ok(PreparedTheme {
+            attr: "focus".to_string(),
+            css: FOCUS_THEME_CSS.to_string(),
+            image_data_url: None,
+        }),
+        "custom" => Ok(PreparedTheme {
+            attr: "custom".to_string(),
+            css: CUSTOM_THEME_CSS.to_string(),
+            image_data_url: Some(custom_theme_data_url(paths)?),
+        }),
+        _ if is_art_theme(theme) => {
+            let art = resolve_art_theme(paths, theme, allow_download)?;
+            let css = render_art_css(&art.attr, &art.meta);
+            let data_url = format!(
+                "data:{};base64,{}",
+                art.meta.mime,
+                BASE64_STANDARD.encode(&art.bytes)
+            );
+            Ok(PreparedTheme {
+                attr: art.attr,
+                css,
+                image_data_url: Some(data_url),
+            })
+        }
+        _ => Err("不支持的主题".to_string()),
+    }
+}
+
+fn resolve_art_theme(
+    paths: &InstallerPaths,
+    theme: &str,
+    allow_download: bool,
+) -> Result<ResolvedArt, String> {
+    if let Some(slug) = theme.strip_prefix("preset:") {
+        let preset = ART_PRESETS
+            .iter()
+            .find(|preset| preset.slug == slug)
+            .ok_or_else(|| "未知的内置主题".to_string())?;
+        return Ok(ResolvedArt {
+            attr: format!("art-{}", preset.slug),
+            meta: ArtThemeMeta {
+                name: preset.name.to_string(),
+                author: preset.author.to_string(),
+                license: preset.license.to_string(),
+                appearance: preset.appearance.to_string(),
+                focus_x: preset.focus_x,
+                focus_y: preset.focus_y,
+                colors: preset.colors.into(),
+                stored_file: String::new(),
+                mime: preset.mime.to_string(),
+            },
+            bytes: preset.bytes.to_vec(),
+        });
+    }
+    if let Some(version_id) = theme.strip_prefix("gallery:") {
+        validate_gallery_version_id(version_id)?;
+        let directory = gallery_theme_directory(paths, version_id);
+        if !directory.join("meta.json").exists() {
+            if !allow_download {
+                return Err("主题文件缺失，请在外观页重新应用该主题".to_string());
+            }
+            download_gallery_theme(paths, version_id)?;
+        }
+        let meta_data = fs::read_to_string(directory.join("meta.json"))
+            .map_err(|_| "主题信息缺失，请重新下载该主题".to_string())?;
+        let meta: ArtThemeMeta =
+            serde_json::from_str(&meta_data).map_err(|_| "主题信息已损坏，请重新下载".to_string())?;
+        if !meta.stored_file.starts_with("background.") || !is_safe_package_token(&meta.stored_file, 64)
+        {
+            return Err("主题背景文件名不安全".to_string());
+        }
+        let bytes = fs::read(directory.join(&meta.stored_file))
+            .map_err(|_| "主题背景文件缺失，请重新下载".to_string())?;
+        if bytes.len() > MAX_THEME_IMAGE_BYTES {
+            return Err("主题背景文件超过 8 MB".to_string());
+        }
+        validate_theme_image(&meta.mime, &bytes)?;
+        return Ok(ResolvedArt {
+            attr: format!("art-g-{}", &version_id[4..]),
+            meta,
+            bytes,
+        });
+    }
+    Err("不支持的主题".to_string())
+}
+
+fn validate_gallery_version_id(version_id: &str) -> Result<(), String> {
+    let valid = version_id.len() >= 12
+        && version_id.len() <= 68
+        && version_id.starts_with("ver_")
+        && version_id[4..]
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit());
+    if valid {
+        Ok(())
+    } else {
+        Err("主题版本标识不合法".to_string())
+    }
+}
+
+fn gallery_theme_directory(paths: &InstallerPaths, version_id: &str) -> PathBuf {
+    theme_directory(paths).join("gallery").join(version_id)
+}
+
+fn list_preset_themes_inner() -> Result<Vec<PresetThemeInfo>, String> {
+    Ok(ART_PRESETS
+        .iter()
+        .map(|preset| PresetThemeInfo {
+            id: format!("preset:{}", preset.slug),
+            name: preset.name.to_string(),
+            author: preset.author.to_string(),
+            license: preset.license.to_string(),
+            appearance: preset.appearance.to_string(),
+            colors: preset.colors.into(),
+            preview_data_url: format!(
+                "data:{};base64,{}",
+                preset.mime,
+                BASE64_STANDARD.encode(preset.bytes)
+            ),
+        })
+        .collect())
+}
+
+fn gallery_http_agent() -> ureq::Agent {
+    let mut builder = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(120))
+        .user_agent(concat!("CodexAssistant/", env!("CARGO_PKG_VERSION")));
+    for variable in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+        let Ok(value) = env::var(variable) else {
+            continue;
+        };
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if let Ok(proxy) = ureq::Proxy::new(value) {
+            builder = builder.proxy(proxy);
+            break;
+        }
+    }
+    builder.build()
+}
+
+fn list_gallery_themes_inner() -> Result<Vec<GalleryThemeInfo>, String> {
+    let paths = resolve_paths()?;
+    let agent = gallery_http_agent();
+    let url = format!(
+        "{GALLERY_API_BASE}/v1/themes?sort=popular&limit={GALLERY_LIST_LIMIT}"
+    );
+    let response = agent
+        .get(&url)
+        .call()
+        .map_err(|error| format!("连接在线主题库失败（如网络受限可先配置代理）: {error}"))?;
+    let payload: serde_json::Value = response
+        .into_json()
+        .map_err(|error| format!("解析在线主题库响应失败: {error}"))?;
+    let items = payload
+        .get("items")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| "在线主题库返回数据格式不正确".to_string())?;
+    let mut themes = Vec::new();
+    for item in items.iter().take(GALLERY_LIST_LIMIT) {
+        let Some(version_id) = item.get("id").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if validate_gallery_version_id(version_id).is_err() {
+            continue;
+        }
+        let name = item
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("未命名主题")
+            .trim()
+            .to_string();
+        let colors = item
+            .pointer("/displayMeta/colors")
+            .and_then(|value| serde_json::from_value::<ArtColors>(value.clone()).ok());
+        let appearance = item
+            .pointer("/displayMeta/appearance")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string());
+        themes.push(GalleryThemeInfo {
+            version_id: version_id.to_string(),
+            theme_id: item
+                .get("themeId")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            name,
+            author: item
+                .get("authorDisplayName")
+                .and_then(|value| value.as_str())
+                .unwrap_or("未知作者")
+                .to_string(),
+            license: item
+                .get("license")
+                .and_then(|value| value.as_str())
+                .unwrap_or("未声明")
+                .to_string(),
+            downloads: item
+                .get("downloadCount")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+            package_bytes: item
+                .get("packageBytes")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+            appearance,
+            colors,
+            downloaded: gallery_theme_directory(&paths, version_id)
+                .join("meta.json")
+                .exists(),
+        });
+    }
+    if themes.is_empty() {
+        return Err("在线主题库暂时没有可用主题".to_string());
+    }
+    Ok(themes)
+}
+
+fn download_gallery_theme(paths: &InstallerPaths, version_id: &str) -> Result<(), String> {
+    validate_gallery_version_id(version_id)?;
+    let agent = gallery_http_agent();
+    let detail_url = format!("{GALLERY_API_BASE}/v1/themes/{version_id}");
+    let detail: serde_json::Value = agent
+        .get(&detail_url)
+        .call()
+        .and_then(|response| response.into_json().map_err(ureq::Error::from))
+        .map_err(|error| format!("获取主题信息失败: {error}"))?;
+    let expected_sha = detail
+        .get("packageSha256")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_ascii_lowercase());
+    let expected_bytes = detail.get("packageBytes").and_then(|value| value.as_u64());
+    if expected_bytes.unwrap_or(0) > MAX_GALLERY_PACKAGE_BYTES {
+        return Err("主题包超过 48 MB 限制".to_string());
+    }
+
+    let download_url = format!("{GALLERY_API_BASE}/v1/themes/{version_id}/download");
+    let response = agent
+        .get(&download_url)
+        .call()
+        .map_err(|error| format!("下载主题包失败（如网络受限可先配置代理）: {error}"))?;
+    let mut package = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_GALLERY_PACKAGE_BYTES + 1)
+        .read_to_end(&mut package)
+        .map_err(|error| format!("读取主题包失败: {error}"))?;
+    if package.len() as u64 > MAX_GALLERY_PACKAGE_BYTES {
+        return Err("主题包超过 48 MB 限制".to_string());
+    }
+    if let Some(expected) = expected_bytes {
+        if expected != package.len() as u64 {
+            return Err("主题包大小与清单不一致，已中止".to_string());
+        }
+    }
+    if let Some(expected) = expected_sha {
+        let digest = Sha256::digest(&package);
+        let actual = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        if actual != expected {
+            return Err("主题包校验和不一致，已中止".to_string());
+        }
+    }
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(package))
+        .map_err(|_| "主题包不是有效的 ZIP 文件".to_string())?;
+    if archive.len() > MAX_GALLERY_ZIP_ENTRIES {
+        return Err("主题包文件数量过多".to_string());
+    }
+    let mut theme_json: Option<serde_json::Value> = None;
+    let mut image: Option<(String, Vec<u8>)> = None;
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|error| format!("读取主题包条目失败: {error}"))?;
+        let enclosed = entry
+            .enclosed_name()
+            .map(PathBuf::from)
+            .ok_or_else(|| "主题包包含不安全路径".to_string())?;
+        let depth = enclosed.components().count();
+        if depth > 2 {
+            continue;
+        }
+        let file_name = enclosed
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if file_name == "theme.json" {
+            let mut buffer = Vec::new();
+            entry
+                .take(1024 * 1024)
+                .read_to_end(&mut buffer)
+                .map_err(|error| format!("读取 theme.json 失败: {error}"))?;
+            theme_json = serde_json::from_slice(&buffer).ok().or(theme_json);
+        } else if matches!(
+            file_name.as_str(),
+            name if name.starts_with("background.")
+                && matches!(name.rsplit('.').next(), Some("jpg" | "jpeg" | "png" | "webp"))
+        ) {
+            let mut buffer = Vec::new();
+            entry
+                .take(MAX_THEME_IMAGE_BYTES as u64 + 1)
+                .read_to_end(&mut buffer)
+                .map_err(|error| format!("读取主题背景失败: {error}"))?;
+            if buffer.len() > MAX_THEME_IMAGE_BYTES {
+                return Err("主题背景图片超过 8 MB".to_string());
+            }
+            image = Some((file_name, buffer));
+        }
+    }
+    let theme_json = theme_json.ok_or_else(|| "主题包缺少 theme.json".to_string())?;
+    let declared_image = theme_json
+        .get("image")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_ascii_lowercase());
+    let (image_name, image_bytes) = match (declared_image, image) {
+        (Some(declared), Some((found, bytes))) if found == declared => Some((found, bytes)),
+        (Some(_), Some(_)) => None,
+        (None, Some(found)) => Some(found),
+        _ => None,
+    }
+    .ok_or_else(|| "主题包缺少 theme.json 声明的背景图片".to_string())?;
+    let extension = image_name.rsplit('.').next().unwrap_or("jpg");
+    let mime = match extension {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => return Err("主题背景仅支持 JPEG、PNG 或 WebP".to_string()),
+    };
+    validate_theme_image(mime, &image_bytes)?;
+
+    let mut meta = ArtThemeMeta {
+        name: theme_json
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("画廊主题")
+            .trim()
+            .to_string(),
+        appearance: theme_json
+            .get("appearance")
+            .and_then(|value| value.as_str())
+            .unwrap_or("dark")
+            .to_string(),
+        focus_x: theme_json
+            .pointer("/art/focusX")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.5)
+            .clamp(0.0, 1.0),
+        focus_y: theme_json
+            .pointer("/art/focusY")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.5)
+            .clamp(0.0, 1.0),
+        colors: theme_json
+            .get("colors")
+            .and_then(|value| serde_json::from_value::<ArtColors>(value.clone()).ok())
+            .unwrap_or_default(),
+        stored_file: format!("background.{extension}"),
+        mime: mime.to_string(),
+        ..ArtThemeMeta::default()
+    };
+    meta.author = detail
+        .get("authorDisplayName")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    meta.license = detail
+        .get("license")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if !matches!(meta.appearance.as_str(), "dark" | "light" | "auto") {
+        meta.appearance = "dark".to_string();
+    }
+
+    let directory = gallery_theme_directory(paths, version_id);
+    let staging = theme_directory(paths)
+        .join("gallery")
+        .join(format!(".staging-{version_id}"));
+    if staging.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    fs::create_dir_all(&staging).map_err(|error| format!("创建主题目录失败: {error}"))?;
+    let write_result = (|| -> Result<(), String> {
+        fs::write(staging.join(&meta.stored_file), &image_bytes)
+            .map_err(|error| format!("保存主题背景失败: {error}"))?;
+        let meta_data = serde_json::to_string_pretty(&meta)
+            .map_err(|error| format!("生成主题信息失败: {error}"))?;
+        fs::write(staging.join("meta.json"), format!("{meta_data}\n"))
+            .map_err(|error| format!("保存主题信息失败: {error}"))?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    if directory.exists() {
+        let _ = fs::remove_dir_all(&directory);
+    }
+    fs::rename(&staging, &directory).map_err(|error| format!("提交主题文件失败: {error}"))?;
+    prune_gallery_themes(paths);
+    Ok(())
+}
+
+fn prune_gallery_themes(paths: &InstallerPaths) {
+    let gallery_root = theme_directory(paths).join("gallery");
+    let Ok(entries) = fs::read_dir(&gallery_root) else {
+        return;
+    };
+    let mut directories: Vec<(PathBuf, std::time::SystemTime)> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| validate_gallery_version_id(name).is_ok())
+                .unwrap_or(false)
+        })
+        .map(|entry| {
+            let modified = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            (entry.path(), modified)
+        })
+        .collect();
+    directories.sort_by_key(|(_, modified)| *modified);
+    while directories.len() > MAX_GALLERY_STORED {
+        if let Some((path, _)) = directories.first() {
+            let _ = fs::remove_dir_all(path);
+        }
+        directories.remove(0);
+    }
+}
+
+fn parse_hex_rgb(color: &str) -> Option<(u8, u8, u8)> {
+    let hex = color.trim().strip_prefix('#')?;
+    let expand = |pair: &str| u8::from_str_radix(pair, 16).ok();
+    match hex.len() {
+        3 => {
+            let mut channels = [0u8; 3];
+            for (index, channel) in hex.chars().enumerate() {
+                let value = channel.to_digit(16)? as u8;
+                channels[index] = value * 16 + value;
+            }
+            Some((channels[0], channels[1], channels[2]))
+        }
+        6 | 8 => Some((expand(&hex[0..2])?, expand(&hex[2..4])?, expand(&hex[4..6])?)),
+        _ => None,
+    }
+}
+
+fn is_safe_css_color(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.len() <= 64
+        && (value.starts_with('#') || value.starts_with("rgb") || value.starts_with("hsl"))
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '#' | ',' | '.' | '(' | ')' | '%' | ' ' | '-')
+        })
+}
+
+fn css_color(value: &str, fallback: &str) -> String {
+    let value = value.trim();
+    if is_safe_css_color(value) {
+        value.to_string()
+    } else {
+        fallback.to_string()
+    }
+}
+
+fn color_with_alpha(value: &str, alpha: f64, fallback: &str) -> String {
+    if let Some((red, green, blue)) = parse_hex_rgb(value) {
+        format!("rgba({red}, {green}, {blue}, {alpha})")
+    } else {
+        css_color(value, fallback)
+    }
+}
+
+fn color_luminance(value: &str) -> Option<f64> {
+    let (red, green, blue) = parse_hex_rgb(value)?;
+    Some(0.299 * f64::from(red) + 0.587 * f64::from(green) + 0.114 * f64::from(blue))
+}
+
+fn art_theme_is_dark(meta: &ArtThemeMeta) -> bool {
+    match meta.appearance.as_str() {
+        "light" => false,
+        "dark" => true,
+        _ => color_luminance(&meta.colors.background)
+            .map(|luminance| luminance < 128.0)
+            .unwrap_or(true),
+    }
+}
+
+fn render_art_css(attr: &str, meta: &ArtThemeMeta) -> String {
+    let dark = art_theme_is_dark(meta);
+    let scheme = if dark { "dark" } else { "light" };
+    let colors = &meta.colors;
+    let background = css_color(&colors.background, "#0b1118");
+    let text = css_color(&colors.text, "#f4f7fb");
+    let text_soft = color_with_alpha(&colors.text, 0.9, "rgba(244, 247, 251, .90)");
+    let panel_a1 = color_with_alpha(&colors.panel, if dark { 0.76 } else { 0.88 }, "rgba(8, 14, 22, .76)");
+    let panel_a2 = color_with_alpha(&colors.panel, if dark { 0.46 } else { 0.62 }, "rgba(8, 14, 22, .46)");
+    let panel_bar = color_with_alpha(&colors.panel, 0.78, "rgba(15, 23, 33, .78)");
+    let composer_bg = color_with_alpha(&colors.panel_alt, 0.84, "rgba(15, 23, 33, .84)");
+    let line_soft = color_with_alpha(&colors.line, 0.5, "rgba(255, 255, 255, .14)");
+    let line_softer = color_with_alpha(&colors.line, 0.3, "rgba(255, 255, 255, .08)");
+    let veil_base: &str = if dark { "#070c13" } else { "#ffffff" };
+    let veil_a1 = color_with_alpha(veil_base, if dark { 0.22 } else { 0.3 }, veil_base);
+    let veil_a2 = color_with_alpha(veil_base, if dark { 0.06 } else { 0.1 }, veil_base);
+    let veil_a3 = color_with_alpha(veil_base, if dark { 0.16 } else { 0.18 }, veil_base);
+    let accent = css_color(&colors.accent, "#4f8f78");
+    let selection_text = if color_luminance(&colors.accent).unwrap_or(0.0) >= 150.0 {
+        "#201a18"
+    } else {
+        "#ffffff"
+    };
+    let focus_x = (meta.focus_x.clamp(0.0, 1.0) * 100.0).round() as u32;
+    let focus_y = (meta.focus_y.clamp(0.0, 1.0) * 100.0).round() as u32;
+    let heading_shadow = if dark {
+        "text-shadow: 0 1px 3px rgba(0, 0, 0, .56) !important;"
+    } else {
+        "text-shadow: 0 1px 2px rgba(255, 255, 255, .35) !important;"
+    };
+    let selector = format!("html[data-codex-assistant-theme=\"{attr}\"]");
+    format!(
+        r#"
+{selector} {{ color-scheme: {scheme} !important; background-color: {background} !important; }}
+{selector} body {{
+  min-height: 100vh !important;
+  background-color: {background} !important;
+  background-image: var(--codex-assistant-art) !important;
+  background-position: {focus_x}% {focus_y}% !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+  color: {text} !important;
+}}
+{selector} aside.app-shell-left-panel {{
+  color: {text} !important;
+  background: linear-gradient(90deg, {panel_a1}, {panel_a2}) !important;
+  border-color: {line_soft} !important;
+  box-shadow: inset -1px 0 {line_softer} !important;
+  backdrop-filter: blur(10px) saturate(1.06) !important;
+}}
+{selector} aside.app-shell-left-panel button,
+{selector} aside.app-shell-left-panel a,
+{selector} aside.app-shell-left-panel [class*="text-token"],
+{selector} aside.app-shell-left-panel svg {{
+  color: {text_soft} !important;
+}}
+{selector} main.main-surface {{
+  color: {text} !important;
+  background: linear-gradient(90deg, {veil_a1}, {veil_a2} 52%, {veil_a3}) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}}
+{selector} main.main-surface > header.app-header-tint,
+{selector} main.main-surface [role="main"],
+{selector} main.main-surface .app-shell-main-content-frame,
+{selector} main.main-surface .app-shell-main-content-top-fade,
+{selector} main.main-surface .thread-scroll-container .bg-gradient-to-t.from-token-main-surface-primary {{
+  background: transparent !important;
+  box-shadow: none !important;
+}}
+{selector} main.main-surface .app-shell-main-content-top-fade {{ display: none !important; }}
+{selector} main.main-surface [class~="bg-token-main-surface-primary"][class~="h-full"][class~="w-full"] {{
+  background: rgba(246, 248, 251, .90) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18), inset 0 0 0 1px rgba(255, 255, 255, .22) !important;
+  backdrop-filter: blur(8px) saturate(1.04) !important;
+}}
+{selector} main.main-surface [class*="_homeUtilityBar_"] {{
+  color: {text} !important;
+  background: {panel_bar} !important;
+  border-color: {line_soft} !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(10px) saturate(1.04) !important;
+}}
+{selector} main.main-surface [class*="_homeUtilityBar_"] * {{ color: inherit !important; }}
+{selector} .composer-surface-chrome {{
+  color: {text} !important;
+  background: {composer_bg} !important;
+  border-color: {line_soft} !important;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .28), inset 0 0 0 1px {line_softer} !important;
+  backdrop-filter: blur(12px) saturate(1.04) !important;
+}}
+{selector} .composer-surface-chrome button:not([class~="bg-token-foreground"]),
+{selector} .composer-surface-chrome input,
+{selector} .composer-surface-chrome textarea,
+{selector} .composer-surface-chrome [contenteditable="true"],
+{selector} .composer-surface-chrome [class*="text-token"],
+{selector} .composer-surface-chrome svg {{
+  color: {text_soft} !important;
+}}
+{selector} [class~="group/application-menu-top-bar"],
+{selector} [class~="group/application-menu-top-bar"] button,
+{selector} [class~="group/application-menu-top-bar"] svg {{
+  color: {text_soft} !important;
+}}
+{selector} main.main-surface h1,
+{selector} main.main-surface h2,
+{selector} main.main-surface h3,
+{selector} main.main-surface .heading-xl,
+{selector} main.main-surface .heading-xl * {{
+  color: {text} !important;
+  {heading_shadow}
+}}
+{selector} ::selection {{ background-color: {accent} !important; color: {selection_text} !important; }}
+"#
+    )
 }
 
 fn validate_theme_image(mime_type: &str, bytes: &[u8]) -> Result<(&'static str, u32, u32), String> {
@@ -1837,12 +2692,11 @@ fn validate_cdp_owner(port: u16, app: &DesktopAppInfo) -> Result<(), String> {
 }
 
 fn inject_theme_into_targets(
-    theme: &str,
+    prepared: &PreparedTheme,
     port: u16,
     targets: &[CdpTarget],
-    custom_data_url: Option<&str>,
 ) -> Result<(), String> {
-    let source = theme_injection_source(theme, custom_data_url)?;
+    let source = theme_injection_source(prepared)?;
     for target in targets {
         if target_requires_windows_setup(&target.web_socket_debugger_url, port)? {
             return Err(
@@ -1912,10 +2766,7 @@ fn target_requires_windows_setup(websocket_url: &str, port: u16) -> Result<bool,
     Ok(false)
 }
 
-fn theme_injection_source(theme: &str, custom_data_url: Option<&str>) -> Result<String, String> {
-    let (css, custom_image_json) = match theme {
-        "focus" => (
-            r#"
+const FOCUS_THEME_CSS: &str = r#"
 html[data-codex-assistant-theme="focus"] { color-scheme: dark !important; }
 html[data-codex-assistant-theme="focus"] body,
 html[data-codex-assistant-theme="focus"] main.main-surface { background-color: #11151b !important; color: #e6e9ee !important; }
@@ -1926,15 +2777,9 @@ html[data-codex-assistant-theme="focus"] main.main-surface h2,
 html[data-codex-assistant-theme="focus"] main.main-surface h3,
 html[data-codex-assistant-theme="focus"] main.main-surface p { color: #e6e9ee !important; }
 html[data-codex-assistant-theme="focus"] ::selection { background-color: #477a67 !important; color: #ffffff !important; }
-"#
-            .to_string(),
-            None,
-        ),
-        "custom" => {
-            let image = custom_data_url.ok_or_else(|| "尚未导入自定义背景".to_string())?;
-            let image_json = serde_json::to_string(image).map_err(|error| error.to_string())?;
-            (
-                r#"
+"#;
+
+const CUSTOM_THEME_CSS: &str = r#"
 html[data-codex-assistant-theme="custom"] { color-scheme: dark !important; background-color: #0b1118 !important; }
 html[data-codex-assistant-theme="custom"] body {
   min-height: 100vh !important;
@@ -2016,12 +2861,13 @@ html[data-codex-assistant-theme="custom"] main.main-surface .heading-xl * {
   text-shadow: 0 1px 3px rgba(0, 0, 0, .56) !important;
 }
 html[data-codex-assistant-theme="custom"] ::selection { background-color: #4f8f78 !important; color: #ffffff !important; }
-"#
-                .to_string(),
-                Some(image_json),
-            )
-        }
-        _ => return Err("不支持的主题".to_string()),
+"#;
+
+fn theme_injection_source(prepared: &PreparedTheme) -> Result<String, String> {
+    let css = &prepared.css;
+    let custom_image_json = match prepared.image_data_url.as_deref() {
+        Some(image) => Some(serde_json::to_string(image).map_err(|error| error.to_string())?),
+        None => None,
     };
     let image_setup = if let Some(image_json) = custom_image_json {
         r#"
@@ -2048,8 +2894,8 @@ html[data-codex-assistant-theme="custom"] ::selection { background-color: #4f8f7
 "#
         .to_string()
     };
-    let theme_json = serde_json::to_string(theme).map_err(|error| error.to_string())?;
-    let css_json = serde_json::to_string(&css).map_err(|error| error.to_string())?;
+    let theme_json = serde_json::to_string(&prepared.attr).map_err(|error| error.to_string())?;
+    let css_json = serde_json::to_string(css).map_err(|error| error.to_string())?;
     Ok(format!(
         r#"(() => {{
   const id = 'codex-assistant-theme-style';
@@ -2822,7 +3668,9 @@ pub fn run() {
             factory_reset,
             get_appearance_status,
             apply_appearance,
-            import_theme_image
+            import_theme_image,
+            list_preset_themes,
+            list_gallery_themes
         ])
         .run(tauri::generate_context!())
         .expect("error while running Codex Assistant app");
@@ -2855,6 +3703,112 @@ pub fn try_run_token_helper_from_args() -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn art_theme_id_detection() {
+        assert!(is_art_theme("preset:wukong"));
+        assert!(is_art_theme("gallery:ver_018ad695fbb33b12e141"));
+        assert!(!is_art_theme("focus"));
+        assert!(!is_art_theme("custom"));
+        assert!(!is_art_theme("presetx:wukong"));
+    }
+
+    #[test]
+    fn gallery_version_id_validation() {
+        assert!(validate_gallery_version_id("ver_018ad695fbb33b12e141").is_ok());
+        assert!(validate_gallery_version_id("ver_8e695413").is_ok());
+        assert!(validate_gallery_version_id("ver_short").is_err());
+        assert!(validate_gallery_version_id("bad_018ad695fbb33b12e141").is_err());
+        assert!(validate_gallery_version_id("ver_018AD695FBB33B12E141").is_err());
+        assert!(validate_gallery_version_id("ver_../../etc/passwd00").is_err());
+    }
+
+    #[test]
+    fn hex_color_parsing() {
+        assert_eq!(parse_hex_rgb("#f6c696"), Some((246, 198, 150)));
+        assert_eq!(parse_hex_rgb("#abc"), Some((170, 187, 204)));
+        assert_eq!(parse_hex_rgb("#131313ff"), Some((19, 19, 19)));
+        assert_eq!(parse_hex_rgb("rgba(1,2,3,.5)"), None);
+        assert_eq!(parse_hex_rgb("#12"), None);
+    }
+
+    #[test]
+    fn css_color_sanitization_blocks_injection() {
+        assert_eq!(css_color("#f6c696", "#000"), "#f6c696");
+        assert_eq!(
+            css_color("rgba(102, 119, 111, 0.28)", "#000"),
+            "rgba(102, 119, 111, 0.28)"
+        );
+        assert_eq!(css_color("red; } body {", "#000"), "#000");
+        assert_eq!(css_color("url(https://evil)", "#000"), "#000");
+        assert_eq!(css_color("", "#000"), "#000");
+        assert_eq!(
+            color_with_alpha("#f6c696", 0.5, "#000"),
+            "rgba(246, 198, 150, 0.5)"
+        );
+        assert_eq!(
+            color_with_alpha("rgba(9,9,9,.4)", 0.5, "#000"),
+            "rgba(9,9,9,.4)"
+        );
+    }
+
+    #[test]
+    fn art_css_uses_theme_tokens() {
+        let preset = ART_PRESETS
+            .iter()
+            .find(|preset| preset.slug == "wukong")
+            .expect("wukong preset");
+        let meta = ArtThemeMeta {
+            name: preset.name.to_string(),
+            appearance: preset.appearance.to_string(),
+            focus_x: preset.focus_x,
+            focus_y: preset.focus_y,
+            colors: preset.colors.into(),
+            ..ArtThemeMeta::default()
+        };
+        let css = render_art_css("art-wukong", &meta);
+        assert!(css.contains("html[data-codex-assistant-theme=\"art-wukong\"]"));
+        assert!(css.contains("color-scheme: dark"));
+        assert!(css.contains("background-position: 0% 50%"));
+        assert!(css.contains("#f0f0f0"));
+        assert!(css.contains("#f6c696"));
+        assert!(css.contains("rgba(29, 30, 29"));
+    }
+
+    #[test]
+    fn art_css_light_theme_uses_light_scheme() {
+        let mut meta = ArtThemeMeta {
+            appearance: "light".to_string(),
+            focus_x: 0.37,
+            focus_y: 0.5,
+            ..ArtThemeMeta::default()
+        };
+        meta.colors.text = "#1c1c1d".to_string();
+        let css = render_art_css("art-g-test", &meta);
+        assert!(css.contains("color-scheme: light"));
+        assert!(css.contains("background-position: 37% 50%"));
+        assert!(css.contains("#1c1c1d"));
+    }
+
+    #[test]
+    fn injection_source_embeds_prepared_theme() {
+        let prepared = PreparedTheme {
+            attr: "art-wukong".to_string(),
+            css: "html {}".to_string(),
+            image_data_url: None,
+        };
+        let source = theme_injection_source(&prepared).expect("injection source");
+        assert!(source.contains("codex-assistant-theme-style"));
+        assert!(source.contains("\"art-wukong\""));
+        assert!(!source.contains("imageDataUrl"));
+        let with_image = PreparedTheme {
+            attr: "custom".to_string(),
+            css: "html {}".to_string(),
+            image_data_url: Some("data:image/png;base64,AAAA".to_string()),
+        };
+        let source = theme_injection_source(&with_image).expect("injection source");
+        assert!(source.contains("imageDataUrl"));
+    }
 
     #[test]
     fn gateway_normalization_adds_v1() {
@@ -3067,18 +4021,25 @@ model = "gpt-5"
 
     #[test]
     fn focus_theme_payload_is_scoped_and_reversible() {
-        let source = theme_injection_source("focus", None).expect("focus payload");
+        let prepared = PreparedTheme {
+            attr: "focus".to_string(),
+            css: FOCUS_THEME_CSS.to_string(),
+            image_data_url: None,
+        };
+        let source = theme_injection_source(&prepared).expect("focus payload");
         assert!(source.contains("codex-assistant-theme-style"));
         assert!(source.contains("data-codex-assistant-theme"));
         assert!(!source.contains("http://"));
-        assert!(theme_injection_source("unknown", None).is_err());
     }
 
     #[test]
     fn custom_theme_requires_a_valid_background() {
-        assert!(theme_injection_source("custom", None).is_err());
-        let source = theme_injection_source("custom", Some("data:image/png;base64,AA=="))
-            .expect("custom payload");
+        let prepared = PreparedTheme {
+            attr: "custom".to_string(),
+            css: CUSTOM_THEME_CSS.to_string(),
+            image_data_url: Some("data:image/png;base64,AA==".to_string()),
+        };
+        let source = theme_injection_source(&prepared).expect("custom payload");
         assert!(source.contains("codex-assistant-art"));
         assert!(source.contains("data:image/png;base64,AA=="));
         assert!(source.contains("URL.createObjectURL"));
