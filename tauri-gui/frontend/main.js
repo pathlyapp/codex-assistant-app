@@ -141,6 +141,7 @@ function bindUi() {
   $("#copyLogButton").addEventListener("click", copyLog);
   $("#exportLogButton").addEventListener("click", exportLog);
   $("#diagnosticCopyButton").addEventListener("click", copyDiagnostics);
+  $("#diagnosticExportButton").addEventListener("click", exportDiagnosticBundle);
   $("#factoryResetButton").addEventListener("click", factoryReset);
   $$(".theme-card:not(:disabled)").forEach((button) =>
     button.addEventListener("click", () => selectAppearance(button.dataset.theme)),
@@ -1312,6 +1313,33 @@ async function copyDiagnostics() {
     showToast("诊断信息已复制");
   } catch {
     showToast("复制失败", true);
+  }
+}
+
+async function exportDiagnosticBundle() {
+  const button = $("#diagnosticExportButton");
+  if (!tauri?.core) return showToast("当前环境无法导出诊断包", true);
+  const lastError = state.lastResultPayload?.error || {};
+  button.disabled = true;
+  button.querySelector(".icon").innerHTML = ICONS.loader;
+  button.querySelector(".icon").classList.add("spin");
+  try {
+    const bundle = await tauri.core.invoke("export_diagnostics", {
+      request: {
+        supportId: lastError.supportId || "",
+        errorCode: lastError.code || "",
+        errorStage: lastError.stage || "",
+        suggestedAction: lastError.suggestedAction || "",
+      },
+    });
+    if (!bundle.savedPath) throw new Error("诊断包未写入下载目录");
+    showToast(`诊断包已保存到 Downloads · ${bundle.supportId}`);
+  } catch (error) {
+    showToast(friendlyError(error, "诊断包导出失败"), true);
+  } finally {
+    button.disabled = false;
+    button.querySelector(".icon").classList.remove("spin");
+    button.querySelector(".icon").innerHTML = ICONS.download;
   }
 }
 

@@ -4,6 +4,8 @@ All notable changes to Codex Assistant are documented in this file.
 
 ## [Unreleased]
 
+- Added a Rust-generated support diagnostic bundle with bounded redacted logs, safe system and transaction summaries, per-file checksums, support IDs, and an export-blocking secret scan.
+
 ## [0.8.8] - 2026-07-28
 
 - Integrated DreamSkin gallery themes into the appearance page: three bundled preset themes (悟空 WUKONG, firefly, 保险柜 办公室 卡通, redistributed under MIT/CC BY with attribution) plus an online popular-theme library fetched from dreamskin.cc with hash-verified downloads, per-theme licensing display, and offline reuse after first apply.

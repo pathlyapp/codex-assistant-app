@@ -24,6 +24,7 @@ use std::io::{Cursor, Read};
 
 mod config_transaction;
 mod contracts;
+mod diagnostics;
 mod official_app;
 mod official_installer;
 mod router_client;
@@ -34,6 +35,7 @@ use contracts::{
     new_operation_id, ErrorEnvelopeV1, SetupStageV1, StageEventV1, StageStatusV1,
     SystemStatusInput, SystemStatusV1, SCHEMA_VERSION_V1,
 };
+use diagnostics::{DiagnosticBundle, DiagnosticExportRequest};
 use official_app::{detect_chatgpt_app, DesktopAppInfo};
 use official_installer::{install_official_chatgpt, preferred_installer_availability};
 use router_client::{ResponsesProbeResult, RouterClient};
@@ -497,6 +499,23 @@ async fn get_system_status() -> Result<SystemStatusV1, ErrorEnvelopeV1> {
 }
 
 #[tauri::command]
+async fn export_diagnostics(
+    app: AppHandle,
+    request: DiagnosticExportRequest,
+) -> Result<DiagnosticBundle, ErrorEnvelopeV1> {
+    let download_directory = app
+        .path()
+        .download_dir()
+        .map_err(|error| command_error("diagnostics_export", error.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        export_diagnostics_inner(&request, &download_directory)
+    })
+    .await
+    .map_err(|error| command_error("diagnostics_export", format!("诊断包生成任务失败: {error}")))?
+    .map_err(|error| command_error("diagnostics_export", error))
+}
+
+#[tauri::command]
 async fn discover_models(request: GatewayProbeRequest) -> Result<ModelDiscovery, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(move || discover_models_inner(request))
         .await
@@ -698,6 +717,29 @@ fn collect_system_status() -> Result<SystemStatusV1, String> {
         last_transaction_id: last_transaction.map(|transaction| transaction.transaction_id),
         transaction_recovery_failed: recovery_failed,
     }))
+}
+
+fn export_diagnostics_inner(
+    request: &DiagnosticExportRequest,
+    download_directory: &Path,
+) -> Result<DiagnosticBundle, String> {
+    let status = collect_system_status()?;
+    let paths = resolve_paths()?;
+    let last_transaction = config_transaction::last_transaction(&paths.install_root)
+        .ok()
+        .flatten();
+    let permissions =
+        diagnostics::permission_summary(&paths.codex_config_path, &paths.install_root);
+    let mut bundle = diagnostics::build_bundle(
+        &status,
+        last_transaction.as_ref(),
+        permissions,
+        request,
+        VERSION,
+        &rfc3339_timestamp()?,
+    )?;
+    diagnostics::save_bundle(&mut bundle, download_directory)?;
+    Ok(bundle)
 }
 
 fn discover_models_inner(request: GatewayProbeRequest) -> Result<ModelDiscovery, String> {
@@ -3641,7 +3683,9 @@ fn redact_error(value: &str) -> String {
 }
 
 fn emit_log(app: &AppHandle, line: impl Into<String>) {
-    let _ = app.emit("installer-log", line.into());
+    let line = line.into();
+    diagnostics::record_log(&line);
+    let _ = app.emit("installer-log", line);
 }
 
 fn emit_stage_event(app: &AppHandle, event: &StageEventV1) {
@@ -3659,6 +3703,7 @@ pub fn run() {
         }))
         .invoke_handler(tauri::generate_handler![
             get_system_status,
+            export_diagnostics,
             discover_models,
             start_setup,
             install_chatgpt_app,

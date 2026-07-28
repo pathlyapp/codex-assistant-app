@@ -251,7 +251,7 @@ impl ErrorEnvelopeV1 {
             message: message.to_string(),
             recoverable,
             suggested_action: suggested_action.to_string(),
-            support_id: support_id(),
+            support_id: new_support_id(),
             technical: json!({ "detail": redact_technical_detail(&safe_detail) }),
         }
     }
@@ -259,7 +259,12 @@ impl ErrorEnvelopeV1 {
 
 fn classify_legacy_error(stage: &str, detail: &str) -> &'static str {
     let lower = detail.to_lowercase();
-    if stage.starts_with("appearance_") {
+    if lower.contains("diagnostic_secret_detected") || lower.contains("诊断包检测到疑似密钥")
+    {
+        "DIAGNOSTIC_SECRET_DETECTED"
+    } else if stage == "diagnostics_export" {
+        "DIAGNOSTIC_EXPORT_FAILED"
+    } else if stage.starts_with("appearance_") {
         classify_appearance_error(stage, &lower)
     } else if stage == "rollback" {
         "ROLLBACK_FAILED"
@@ -596,6 +601,18 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
             true,
             "open_diagnostics",
         ),
+        "DIAGNOSTIC_SECRET_DETECTED" => (
+            "诊断包已停止导出",
+            "二次安全检查发现疑似密钥或用户路径，请清理相关日志后重试。",
+            true,
+            "retry_diagnostics",
+        ),
+        "DIAGNOSTIC_EXPORT_FAILED" => (
+            "诊断包无法保存",
+            "助手无法把诊断包写入系统下载目录，请检查磁盘空间和目录权限后重试。",
+            true,
+            "retry_diagnostics",
+        ),
         "APPEARANCE_UNSUPPORTED" => (
             "当前环境不支持主题功能",
             "此平台、ChatGPT 版本或主题类型暂时无法使用。",
@@ -647,7 +664,7 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
     }
 }
 
-fn redact_technical_detail(detail: &str) -> String {
+pub(crate) fn redact_technical_detail(detail: &str) -> String {
     static BEARER: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"(?i)\bBearer\s+[^\s,;"']+"#).expect("bearer regex"));
     static ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
@@ -657,6 +674,10 @@ fn redact_technical_detail(detail: &str) -> String {
     static JSON_SECRET: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"(?i)("(?:access[_-]?key|api[_-]?key|token|key)"\s*:\s*")[^"]+"#)
             .expect("json secret regex")
+    });
+    static COLON_ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)\b(access[_-]?key|api[_-]?key|token|key)\s*:\s*([^\s,;"']+)"#)
+            .expect("colon assignment regex")
     });
     static URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"(?i)(https?://)[^/\s:@]+(?::[^/\s@]*)?@"#).expect("url userinfo regex")
@@ -668,17 +689,23 @@ fn redact_technical_detail(detail: &str) -> String {
         LazyLock::new(|| Regex::new(r#"/Users/[^/\s]+"#).expect("mac home regex"));
     static LINUX_HOME: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"/home/[^/\s]+"#).expect("linux home regex"));
+    static TOKEN_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)\b(?:sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,}|xoxb-[A-Za-z0-9-]{8,})\b"#)
+            .expect("token prefix regex")
+    });
 
     let output = BEARER.replace_all(detail, "Bearer [redacted]");
     let output = ASSIGNMENT.replace_all(&output, "$1=[redacted]");
     let output = JSON_SECRET.replace_all(&output, "$1[redacted]");
+    let output = COLON_ASSIGNMENT.replace_all(&output, "$1: [redacted]");
     let output = URL_USERINFO.replace_all(&output, "$1[redacted]@");
     let output = WINDOWS_HOME.replace_all(&output, "%USERPROFILE%");
     let output = MAC_HOME.replace_all(&output, "$$HOME");
-    LINUX_HOME.replace_all(&output, "$$HOME").into_owned()
+    let output = LINUX_HOME.replace_all(&output, "$$HOME");
+    TOKEN_PREFIX.replace_all(&output, "[redacted]").into_owned()
 }
 
-fn support_id() -> String {
+pub(crate) fn new_support_id() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -962,6 +989,18 @@ mod tests {
             "Router /models 没有返回可用模型",
         );
         assert_eq!(no_models.code, "ROUTER_MODELS_INVALID");
+
+        let diagnostic_secret = ErrorEnvelopeV1::from_legacy(
+            "diagnostics_export",
+            "DIAGNOSTIC_SECRET_DETECTED: 诊断包检测到疑似密钥",
+        );
+        assert_eq!(diagnostic_secret.code, "DIAGNOSTIC_SECRET_DETECTED");
+        assert_eq!(diagnostic_secret.suggested_action, "retry_diagnostics");
+
+        let diagnostic_write =
+            ErrorEnvelopeV1::from_legacy("diagnostics_export", "无法写入系统下载目录");
+        assert_eq!(diagnostic_write.code, "DIAGNOSTIC_EXPORT_FAILED");
+        assert_eq!(diagnostic_write.suggested_action, "retry_diagnostics");
     }
 
     #[test]

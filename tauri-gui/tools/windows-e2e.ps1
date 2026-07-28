@@ -47,6 +47,15 @@ function Get-FileFingerprint([string]$Path) {
   }
 }
 
+function Get-BytesSha256([byte[]]$Bytes) {
+  $sha256 = [Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($sha256.ComputeHash($Bytes))).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+}
+
 function Assert-FileFingerprint([string]$Path, $Before, [string]$Label) {
   $after = Get-FileFingerprint $Path
   if ($after.exists -ne $Before.exists -or $after.sha256 -ne $Before.sha256) {
@@ -547,6 +556,123 @@ if ($statusAfterSetup.overall -ne "ready" -or
     !$statusAfterSetup.ready) {
   throw "SystemStatusV1 did not become Responses-verified after setup: $($statusAfterSetup | ConvertTo-Json -Compress)"
 }
+
+$diagnosticBundle = Invoke-CdpExpression $socket @'
+(async () => {
+  return window.__TAURI__.core.invoke('export_diagnostics', {
+    request: {
+      supportId: '',
+      errorCode: '',
+      errorStage: '',
+      suggestedAction: ''
+    }
+  });
+})()
+'@ 21
+if ($diagnosticBundle.fileName -notmatch '^diagnostics-CA-[A-Z0-9-]+\.zip$' -or
+    !$diagnosticBundle.supportId -or
+    !$diagnosticBundle.contentBase64 -or
+    !$diagnosticBundle.savedPath -or
+    !(Test-Path $diagnosticBundle.savedPath) -or
+    $diagnosticBundle.sha256 -notmatch '^[a-f0-9]{64}$') {
+  throw "Diagnostic bundle receipt is incomplete"
+}
+$diagnosticBytes = [Convert]::FromBase64String($diagnosticBundle.contentBase64)
+if ($diagnosticBytes.Length -ne $diagnosticBundle.byteLength -or
+    (Get-BytesSha256 $diagnosticBytes) -ne $diagnosticBundle.sha256 -or
+    (Get-FileHash $diagnosticBundle.savedPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne
+      $diagnosticBundle.sha256) {
+  throw "Diagnostic bundle receipt hash or byte length is invalid"
+}
+
+Add-Type -AssemblyName System.IO.Compression
+$diagnosticStream = [IO.MemoryStream]::new($diagnosticBytes)
+$diagnosticArchive = [IO.Compression.ZipArchive]::new(
+  $diagnosticStream,
+  [IO.Compression.ZipArchiveMode]::Read,
+  $false
+)
+try {
+  $expectedDiagnosticEntries = @("checksums.txt", "manifest.json", "recent.log", "status.json")
+  $actualDiagnosticEntries = @($diagnosticArchive.Entries | ForEach-Object { $_.FullName } | Sort-Object)
+  if ($actualDiagnosticEntries.Count -ne $expectedDiagnosticEntries.Count -or
+      (Compare-Object $expectedDiagnosticEntries $actualDiagnosticEntries)) {
+    throw "Diagnostic bundle does not contain the required four files"
+  }
+
+  $diagnosticTexts = @{}
+  foreach ($entryName in $expectedDiagnosticEntries) {
+    $entry = $diagnosticArchive.GetEntry($entryName)
+    $reader = [IO.StreamReader]::new($entry.Open(), [Text.Encoding]::UTF8)
+    try {
+      $diagnosticTexts[$entryName] = $reader.ReadToEnd()
+    } finally {
+      $reader.Dispose()
+    }
+  }
+  $combinedDiagnosticText = ($diagnosticTexts.Values -join "`n")
+  if (($RouterKey -and $combinedDiagnosticText.Contains($RouterKey)) -or
+      $combinedDiagnosticText -match '(?i)Bearer\s+(?!\[redacted\])\S+' -or
+      $combinedDiagnosticText -match '(?i)[A-Z]:\\Users\\[^\\\s]+' -or
+      $combinedDiagnosticText -match '(?i)\b(sk-|ghp_|xoxb-)[A-Za-z0-9_-]{8,}') {
+    throw "Diagnostic bundle contains unredacted sensitive data"
+  }
+
+  $checksums = $diagnosticTexts["checksums.txt"]
+  foreach ($entryName in @("manifest.json", "status.json", "recent.log")) {
+    $entryHash = Get-BytesSha256 ([Text.Encoding]::UTF8.GetBytes($diagnosticTexts[$entryName]))
+    if (!$checksums.Contains("$entryHash  $entryName")) {
+      throw "Diagnostic bundle checksum mismatch for $entryName"
+    }
+  }
+} finally {
+  $diagnosticArchive.Dispose()
+  $diagnosticStream.Dispose()
+}
+
+$downloadsDirectory = Split-Path $diagnosticBundle.savedPath -Parent
+$existingDiagnosticDownloads = @{}
+Get-ChildItem $downloadsDirectory -Filter "diagnostics-CA-*.zip" -ErrorAction SilentlyContinue |
+  ForEach-Object {
+    $existingDiagnosticDownloads[$_.FullName] =
+      (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+$diagnosticDownloadUi = Invoke-CdpExpression $socket @'
+(async () => {
+  document.querySelector('[data-view="diagnostics"]').click();
+  const button = document.querySelector('#diagnosticExportButton');
+  button.click();
+  const deadline = Date.now() + 30000;
+  while (button.disabled && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return {
+    completed: !button.disabled,
+    toast: document.querySelector('#actionToast').textContent.trim()
+  };
+})()
+'@ 22
+if (!$diagnosticDownloadUi.completed -or
+    $diagnosticDownloadUi.toast -notmatch 'CA-[A-Z0-9-]+') {
+  throw "Diagnostic export button did not complete with a support ID"
+}
+$downloadedDiagnostic = Wait-Until {
+  Get-ChildItem $downloadsDirectory -Filter "diagnostics-CA-*.zip" -ErrorAction SilentlyContinue |
+    Where-Object {
+      !$existingDiagnosticDownloads.ContainsKey($_.FullName) -or
+      $existingDiagnosticDownloads[$_.FullName] -ne
+        (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+} 15 "Diagnostic export button did not create a ZIP in Downloads"
+if ($downloadedDiagnostic.Length -le 0) {
+  throw "Diagnostic export button created an empty ZIP"
+}
+$diagnosticUiDownloadSha256 = (Get-FileHash $downloadedDiagnostic.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+Remove-Item $downloadedDiagnostic.FullName -Force
+Remove-Item $diagnosticBundle.savedPath -Force
+
 $keyConfigured = [bool]$RouterKey
 if ($keyConfigured) {
   if ($runtimeState.tokenMode -ne "static" -or $runtimeState.secretStorage -ne "dpapi") {
@@ -779,6 +905,9 @@ $socket.Dispose()
   chatGptProcessCountDuringSetup = $chatGptAfter
   chatGptLaunchedAfterExplicitAction = $chatGptLaunched
   backupAvailableInUi = [bool]($backupUiVisible.home -and $backupUiVisible.diagnostics)
+  diagnosticSupportId = $diagnosticBundle.supportId
+  diagnosticBundleSha256 = $diagnosticBundle.sha256
+  diagnosticUiDownloadSha256 = $diagnosticUiDownloadSha256
   restoreRoundTrip = $restoreRoundTrip
   appearanceApplied = $appearanceApplied
   appearanceDomTheme = $appearanceDomTheme

@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@34e2a32` |
+| 开发基线 | `main@e6a2bcb` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m2-official-installer-adapter` |
-| 当前 PR | [#20](https://github.com/theivanxu/codex-assistant/pull/20) |
+| 当前分支 | `feat/m6-diagnostic-bundle` |
+| 当前 PR | [#21](https://github.com/theivanxu/codex-assistant/pull/21) |
 | 当前应用版本 | `0.8.8` |
 | 下一内部候选 | `0.9.0-alpha.1` |
-| 当前主里程碑 | M2 官方安装 adapter；M0/M1/M3/M4/M5 外部门禁 |
+| 当前主里程碑 | M6 脱敏诊断包；M0-M5 外部门禁 |
 
 ## 里程碑状态
 
@@ -27,7 +27,7 @@
 | M3 Router 真实响应验证 | 待验证 | PR #16 已合并；`/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
 | M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E | 文件系统故障矩阵、真实断电恢复、有效来源检测和 macOS Keychain |
 | M5 小白用户交互 | 进行中 | PR #18 已合并；四步向导、真实前置状态、成功/失败/回滚 E2E 和响应式断点已接入 | 125%/150% 缩放、键盘、屏幕阅读器和缺失应用人工路径验收 |
-| M6 诊断与生命周期 | 未开始 | 有基础诊断和手动恢复 | 脱敏诊断包、定向修复、升级/卸载 E2E |
+| M6 诊断与生命周期 | 进行中 | Rust 结构化诊断包、双重脱敏、support ID、SHA256 和导出前阻断扫描已接入 | Windows/macOS E2E、定向修复、升级/卸载 E2E |
 | M7 签名与企业交付 | 未开始 | CI 可构建三平台，Release 有 SHA256，尚未签名 | Windows 签名、macOS 公证、企业网络与发布门禁 |
 
 状态只允许使用：`未开始`、`进行中`、`受阻`、`待验证`、`已验证`。
@@ -54,6 +54,7 @@
 | WP-503 服务配置 | 待验证 | Router/Key/模型使用真实发现和规范化结果；原有 E2E 选择器保持稳定 | 企业代理/CA 与 macOS 实机 |
 | WP-504 错误和恢复 | 待验证 | 失败唯一主动作、日志自动展开、常驻复制诊断；Responses 失败和 verify 回滚 E2E | 其它错误码推荐动作和恢复失败注入 |
 | WP-505 平台体验 | 进行中 | 系统字体、浅色模式、原生标题栏、焦点返回和 720/560px 响应式断点 | 820x640、940x720、125%/150%、键盘和屏幕阅读器 |
+| WP-601 脱敏诊断包 | 进行中 | `docs/m6-diagnostic-bundle.zh-CN.md`；Rust 有界日志、固定四文件 ZIP、逐项 SHA256、二次扫描和一键导出；本机测试通过 | Windows ARM64 WebView2 E2E、x64 目标和 macOS 正式候选 |
 
 ## 证据规则
 
@@ -232,6 +233,27 @@
   进程为 0。VM 最终恢复 ARM64 原生候选，测试 Router 已停止。
 - `WP-202` 保持进行中：还需真实“未安装到成功”收据、缺失 winget 和安装后不可信
   结果注入；真实 x64 硬件仍为发布门禁。
+- PR #20 全量 CI 通过后 squash 合并为 `main@e6a2bcb`；从该提交创建
+  `feat/m6-diagnostic-bundle`，开始 M6 `WP-601`。
+- 新增 Rust `export_diagnostics` 命令和 256 KiB 有界日志缓冲。ZIP 固定包含
+  `manifest.json`、`status.json`、`recent.log` 和 `checksums.txt`，前端只负责下载。
+- 状态只保留官方应用、有效配置来源、Router 安全端点、代理/CA 变量是否存在、
+  权限布尔摘要和事务结果；不导出完整配置、Key、用户目录、prompt 或响应正文。
+- 导出前再次扫描 Bearer、Key/Token 赋值、URL userinfo、三平台用户目录和常见
+  token 前缀；命中时返回 `DIAGNOSTIC_SECRET_DETECTED` 并阻止生成 ZIP。
+- 本机格式、Clippy、前端语法、版本一致性和 Rust 测试通过；Rust 为 56 通过、
+  0 失败、1 个本地 Ollama live test 忽略。
+- Windows ARM64/x64 目标测试均为 56 通过、0 失败、1 忽略，两个 NSIS 候选均构建
+  成功。ARM64 候选为 5,591,681 字节，SHA256
+  `029e5bf3b217bffcc8dfd3a21f9ebe91d9f0c3facb15a9a8f9a3f09ed756eace`；x64
+  候选为 5,965,032 字节，SHA256
+  `ae948cd4312baae70ea24dbc2c6ec4e644d976c9f6e186dc68092a516222cb2c`。
+- ARM64 原生和 x64 兼容层静默安装不自启、首次响应、单实例和 UI E2E 均通过。
+  两次 E2E 都验证 core command 与页面按钮实际写入系统 Known Downloads Folder，
+  ZIP 四文件、整体/逐项 SHA256 和敏感信息扫描通过；配置期间 ChatGPT 进程为 0。
+- 首轮 Blob 下载在 WebView2 中出现前端完成但无文件的假成功，改为 Rust 原生保存；
+  Parallels 下载目录重定向进一步证明 E2E 和实现都不能硬编码用户目录。VM 已恢复
+  ARM64 原生候选，受控 Router 已停止；真实 x64 和 macOS 正式候选仍是独立门禁。
 
 ## GitHub 追踪
 

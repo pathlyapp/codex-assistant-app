@@ -87,6 +87,9 @@
 - `list_preset_themes`
 - `list_gallery_themes`
 
+诊断导出使用 `export_diagnostics` 命令和 `diagnostics_export` stage。二次扫描发现疑似
+凭据或用户目录时返回 `DIAGNOSTIC_SECRET_DETECTED`，并阻止生成可下载文件。
+
 底层文件、网络和平台函数仍可在 Rust 内部使用 `Result<_, String>`，但字符串错误必须
 在 command 边界转换并经过统一脱敏后才能进入前端。
 
