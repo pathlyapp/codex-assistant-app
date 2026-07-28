@@ -20,6 +20,7 @@ use std::io::{Cursor, Read};
 
 mod config_transaction;
 mod contracts;
+mod official_app;
 mod router_client;
 mod token_support;
 
@@ -28,6 +29,7 @@ use contracts::{
     new_operation_id, ErrorEnvelopeV1, SetupStageV1, StageEventV1, StageStatusV1,
     SystemStatusInput, SystemStatusV1, SCHEMA_VERSION_V1,
 };
+use official_app::{detect_chatgpt_app, DesktopAppInfo};
 use router_client::{ResponsesProbeResult, RouterClient};
 
 const VERSION: &str = "0.8.8";
@@ -413,20 +415,6 @@ struct InstallerPaths {
     codex_config_path: PathBuf,
 }
 
-#[derive(Clone, Debug)]
-struct DesktopAppInfo {
-    installed: bool,
-    name: String,
-    version: Option<String>,
-    detail: String,
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    package_family_name: Option<String>,
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    app_id: Option<String>,
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    executable_path: Option<String>,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CdpTarget {
@@ -683,6 +671,9 @@ fn collect_system_status() -> Result<SystemStatusV1, String> {
         platform: platform_name().to_string(),
         architecture: std::env::consts::ARCH.to_string(),
         app_installed: app.installed,
+        app_state: app.state,
+        app_trusted: app.trusted,
+        app_source: app.source,
         app_name: app.name,
         app_version: app.version,
         app_detail: app.detail,
@@ -938,6 +929,11 @@ fn preflight_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
     let detected = detect_chatgpt_app()?;
     if detected.installed {
         emit_log(app, format!("[OK] {}\n", detected.detail));
+    } else if detected.state == "needs_repair" {
+        return Err(format!(
+            "检测到 ChatGPT 异常软件包，发布者、签名或安装状态不可信：{}",
+            detected.detail
+        ));
     } else if ctx.options.install_chatgpt && cfg!(target_os = "windows") {
         let winget = resolve_winget()?;
         emit_log(
@@ -953,8 +949,15 @@ fn preflight_setup(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
 }
 
 fn install_chatgpt_app_inner(app: &AppHandle) -> Result<SystemStatusV1, String> {
-    if detect_chatgpt_app()?.installed {
+    let detected = detect_chatgpt_app()?;
+    if detected.installed {
         return collect_system_status();
+    }
+    if detected.state == "needs_repair" {
+        return Err(format!(
+            "检测到 ChatGPT 异常软件包，发布者、签名或安装状态不可信：{}",
+            detected.detail
+        ));
     }
     if !cfg!(target_os = "windows") {
         return Err("当前平台请先通过 OpenAI 官方渠道安装 ChatGPT，再返回助手刷新状态".to_string());
@@ -971,6 +974,12 @@ fn install_chatgpt(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
     if detected.installed {
         return Ok(StageOutcome::skipped("已安装官方 ChatGPT，无需重复安装")
             .with_details(json!({ "version": detected.version, "detail": detected.detail })));
+    }
+    if detected.state == "needs_repair" {
+        return Err(format!(
+            "检测到 ChatGPT 异常软件包，发布者、签名或安装状态不可信：{}",
+            detected.detail
+        ));
     }
     if !ctx.options.install_chatgpt {
         return Err("ChatGPT 尚未安装".to_string());
@@ -1229,141 +1238,6 @@ fn wait_for_chatgpt(timeout: Duration) -> bool {
         thread::sleep(Duration::from_secs(2));
     }
     false
-}
-
-fn detect_chatgpt_app() -> Result<DesktopAppInfo, String> {
-    #[cfg(target_os = "windows")]
-    {
-        detect_chatgpt_windows()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        for path in [
-            PathBuf::from("/Applications/ChatGPT.app"),
-            user_home_dir()?.join("Applications").join("ChatGPT.app"),
-            PathBuf::from("/Applications/Codex.app"),
-        ] {
-            if path.is_dir() {
-                let executable_name = path
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("ChatGPT");
-                return Ok(DesktopAppInfo {
-                    installed: true,
-                    name: "ChatGPT".to_string(),
-                    version: None,
-                    detail: format!("已安装：{}", path.display()),
-                    package_family_name: None,
-                    app_id: None,
-                    executable_path: Some(
-                        path.join("Contents")
-                            .join("MacOS")
-                            .join(executable_name)
-                            .to_string_lossy()
-                            .to_string(),
-                    ),
-                });
-            }
-        }
-        Ok(DesktopAppInfo {
-            installed: false,
-            name: "ChatGPT".to_string(),
-            version: None,
-            detail: "未检测到官方 ChatGPT 应用".to_string(),
-            package_family_name: None,
-            app_id: None,
-            executable_path: None,
-        })
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    Ok(DesktopAppInfo {
-        installed: false,
-        name: "ChatGPT".to_string(),
-        version: None,
-        detail: "当前平台不支持桌面应用检测".to_string(),
-        package_family_name: None,
-        app_id: None,
-        executable_path: None,
-    })
-}
-
-#[cfg(target_os = "windows")]
-fn detect_chatgpt_windows() -> Result<DesktopAppInfo, String> {
-    let script = r#"
-$ErrorActionPreference = 'Stop'
-$pkg = Get-AppxPackage -Name 'OpenAI.Codex' | Sort-Object Version -Descending | Select-Object -First 1
-if (-not $pkg) {
-  $pkg = Get-AppxPackage | Where-Object { $_.PackageFamilyName -like 'OpenAI.Codex_*' } | Sort-Object Version -Descending | Select-Object -First 1
-}
-if ($pkg) {
-  $appId = ''
-  $exe = ''
-  $manifestPath = Join-Path $pkg.InstallLocation 'AppxManifest.xml'
-  if (Test-Path $manifestPath) {
-    [xml]$manifest = Get-Content -LiteralPath $manifestPath
-    $app = $manifest.Package.Applications.Application | Where-Object { $_.Executable -match '(ChatGPT|Codex)\.exe$' } | Select-Object -First 1
-    if (-not $app) { $app = $manifest.Package.Applications.Application | Select-Object -First 1 }
-    if ($app) {
-      $appId = '' + $app.Id
-      $exe = Join-Path $pkg.InstallLocation ('' + $app.Executable)
-    }
-  }
-  @($pkg.Name, $pkg.PackageFamilyName, $pkg.Version, $pkg.InstallLocation, $appId, $exe) -join "`t"
-}
-"#;
-    let output = run_command_capture(
-        "powershell.exe",
-        &["-NoProfile", "-NonInteractive", "-Command", script],
-        Duration::from_secs(10),
-    )?;
-    let line = output.lines().find(|line| !line.trim().is_empty());
-    let Some(line) = line else {
-        return Ok(DesktopAppInfo {
-            installed: false,
-            name: "ChatGPT".to_string(),
-            version: None,
-            detail: "未检测到 Microsoft Store 官方 ChatGPT".to_string(),
-            package_family_name: None,
-            app_id: None,
-            executable_path: None,
-        });
-    };
-    let fields = line.split('\t').collect::<Vec<_>>();
-    let version = fields
-        .get(2)
-        .map(|value| value.to_string())
-        .filter(|value| !value.is_empty());
-    let package_family_name = fields
-        .get(1)
-        .map(|value| value.to_string())
-        .filter(|value| !value.is_empty());
-    let app_id = fields
-        .get(4)
-        .map(|value| value.to_string())
-        .filter(|value| !value.is_empty());
-    let executable_ok = fields
-        .get(5)
-        .map(|path| Path::new(path).is_file())
-        .unwrap_or(false);
-    Ok(DesktopAppInfo {
-        installed: package_family_name.is_some() && executable_ok,
-        name: "ChatGPT".to_string(),
-        version: version.clone(),
-        detail: if executable_ok {
-            format!(
-                "Microsoft Store 官方应用{}",
-                version.map(|v| format!(" · {v}")).unwrap_or_default()
-            )
-        } else {
-            "检测到软件包，但 ChatGPT 程序文件不完整".to_string()
-        },
-        package_family_name,
-        app_id,
-        executable_path: fields
-            .get(5)
-            .map(|value| value.to_string())
-            .filter(|value| !value.is_empty()),
-    })
 }
 
 fn launch_chatgpt_inner() -> Result<(), String> {

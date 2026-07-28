@@ -190,6 +190,13 @@ $connection = Invoke-CdpExpression $socket @"
   }
   if (refresh.disabled || overviewAction.disabled) throw new Error('Initial status check did not finish');
   const status = await window.__TAURI__.core.invoke('get_system_status');
+  if (status.app?.state !== 'installed' ||
+      status.app?.trusted !== true ||
+      status.app?.source !== 'microsoft-store' ||
+      !status.app?.version) {
+    throw new Error('Official ChatGPT package did not produce trusted Windows evidence: ' +
+      JSON.stringify(status.app));
+  }
   const statusEvidence = {
     app: document.querySelector('#appStatusBadge').classList.contains('success'),
     router: document.querySelector('#routerStatusBadge').classList.contains('success'),
@@ -335,6 +342,9 @@ $result = Invoke-CdpExpression $socket @'
     summaryKeys: [...document.querySelectorAll('#resultSummary [data-summary-key]')].map(row => row.dataset.summaryKey),
     diagnosticActionVisible: !document.querySelector('#resultDiagnosticButton').classList.contains('hidden'),
     retryIsPrimary: document.querySelector('#resultBackButton').classList.contains('primary-button'),
+    installTaskState: document.querySelector('[data-task-id="install_chatgpt"]')?.classList.contains('skipped')
+      ? 'skipped'
+      : 'unexpected',
     completedGuidedSteps: document.querySelectorAll('[data-guided-step].complete').length,
     logs: document.querySelector('#logOutput').textContent
   };
@@ -344,6 +354,9 @@ $chatGptAfter = Get-ChatGptProcessCount
 
 if (!$result.visible) { throw "Configuration result did not become visible" }
 if (!$result.diagnosticActionVisible) { throw "Result page does not expose the persistent diagnostic action" }
+if ($result.installTaskState -ne "skipped") {
+  throw "Healthy official ChatGPT package did not skip the install stage"
+}
 if ($chatGptBefore -ne 0 -or $chatGptAfter -ne 0) {
   throw "ChatGPT was running during configuration (before=$chatGptBefore, after=$chatGptAfter)"
 }
@@ -759,6 +772,7 @@ $socket.Dispose()
   statusConsistency = [bool]$connection.statusConsistency
   transactionId = $runtimeState.transactionId
   transactionStatus = $committedTransaction.status
+  installTaskState = $result.installTaskState
   keyConfigured = $keyConfigured
   resultTitle = $result.title
   localOllamaDiagnostic = $connection.localOllamaDiagnostic

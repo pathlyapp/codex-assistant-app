@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@e84c3c0` |
+| 开发基线 | `main@ab055b8` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m5-guided-setup` |
-| 当前 PR | [#18](https://github.com/theivanxu/codex-assistant/pull/18) |
+| 当前分支 | `feat/m2-trusted-app-detection` |
+| 当前 PR | [#19](https://github.com/theivanxu/codex-assistant/pull/19) |
 | 当前应用版本 | `0.8.8` |
 | 下一内部候选 | `0.9.0-alpha.1` |
-| 当前主里程碑 | M0/M1/M3/M4 外部门禁；M5 小白用户向导 |
+| 当前主里程碑 | M2 官方应用可信检测；M0/M1/M3/M4/M5 外部门禁 |
 
 ## 里程碑状态
 
@@ -23,10 +23,10 @@
 | --- | --- | --- | --- |
 | M0 规格与基线 | 进行中 | SPEC、追踪矩阵、在线 M0-M7 milestone/Epic 和质量基线已建立 | 真实 x64 与干净用户跨平台 E2E 完成 |
 | M1 状态、错误和工作流契约 | 待验证 | PR #15 已合并；全部 Tauri command 使用 V1 envelope，状态、阶段事件、跨平台错误 fixture 和脱敏已接入 | Windows UI 错误交互复核，补齐取消与跨重启恢复边界 |
-| M2 官方应用安装可靠性 | 未开始 | Windows 使用 Store/winget，结果会二次检测 | 可信来源、架构、安装结果和恢复路径可审计 |
+| M2 官方应用安装可靠性 | 进行中 | Windows 统一版包身份、Publisher、Store 签名、注册状态、版本、架构和启动入口已统一检测；双架构目标与 VM E2E 通过 | Web Installer/winget adapter、下载签名门禁、损坏注册修复、macOS 严格签名 |
 | M3 Router 真实响应验证 | 待验证 | PR #16 已合并；`/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
 | M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E | 文件系统故障矩阵、真实断电恢复、有效来源检测和 macOS Keychain |
-| M5 小白用户交互 | 进行中 | 四步用户向导、真实前置状态、成功摘要、回滚提示、常驻复制诊断和响应式断点已接入 | Windows 成功/失败/回滚 E2E，125%/150% 缩放、键盘和屏幕阅读器验收 |
+| M5 小白用户交互 | 进行中 | PR #18 已合并；四步向导、真实前置状态、成功/失败/回滚 E2E 和响应式断点已接入 | 125%/150% 缩放、键盘、屏幕阅读器和缺失应用人工路径验收 |
 | M6 诊断与生命周期 | 未开始 | 有基础诊断和手动恢复 | 脱敏诊断包、定向修复、升级/卸载 E2E |
 | M7 签名与企业交付 | 未开始 | CI 可构建三平台，Release 有 SHA256，尚未签名 | Windows 签名、macOS 公证、企业网络与发布门禁 |
 
@@ -42,6 +42,8 @@
 | WP-101 SystemStatusV1 | 已验证 | 组合单测；Windows E2E 断言首页、配置页和诊断页消费同一核心状态 | 0.8.x 兼容字段按版本策略后续移除 |
 | WP-102 ErrorEnvelopeV1 | 待验证 | 全部 command 返回稳定 code/support ID；跨平台 fixture；统一脱敏 | Windows UI 逐类错误和推荐动作验收 |
 | WP-103 WorkflowV1 | 进行中 | schema、operation ID、cancellable、合法转换与前端去重 | 未完成事务检测和取消语义转入 M4/M5 |
+| WP-201 平台与可信包检测 | 待验证 | `docs/m2-official-app-detection.zh-CN.md`；`official_app.rs`；Windows ARM64/x64 目标测试与 VM E2E | 损坏注册真实注入、macOS 全新样本严格签名、真实 x64 |
+| WP-202 官方安装 adapter | 进行中 | 现有 winget + Store ID；OpenAI 下载页 Web Installer 已确认由 Microsoft 有效签名 | 完成 adapter trait、最终域名/签名/架构验证、取消/重试和 fallback |
 | WP-301 统一网络客户端 | 待验证 | `router_client.rs`；models/responses 共用代理、CA、超时和 Bearer 路径 | Windows 企业代理与私有 CA 夹具 |
 | WP-302 模型发现 | 已验证 | 限制响应大小和模型数量；去重、空 ID、提交二次核对及 Windows ARM64 UI E2E | 保持跨平台回归 |
 | WP-303 Responses Probe | 待验证 | 固定 `Return OK.`、16 token、SSE/JSON、完成事件、模型一致性、正文不留存；Windows ARM64 正常/404/断流 E2E | 真实 Ollama/LM Studio 兼容服务 |
@@ -190,6 +192,29 @@
   稳定停在 `validate_router_response` 且配置不变，verify 故障自动回滚并显示
   `recoveryState=restored`，四个受管文件指纹恢复。两种失败恢复 normal 后均可直接
   重试，`-TestRestore` 通过，所有配置过程中 ChatGPT 进程为 0。
+- PR [#18](https://github.com/theivanxu/codex-assistant/pull/18) 全量 CI 通过后 squash
+  合并为 `main@ab055b8`；M5 Epic 保持开放追踪缩放、键盘、读屏和缺失应用门禁。
+- 从 `main@ab055b8` 创建 `feat/m2-trusted-app-detection`，开始 M2 `WP-201`。
+- OpenAI 当前统一版下载页把 Windows 指向 Store Product ID `9PLM9XGG6VKS`；
+  ChatGPT Classic 为独立 `9NT1R1C2HH7J`，助手只把统一版作为 Codex 就绪证据。
+- 新增 `official_app.rs`。Windows 只有 Package Name/Family、Publisher/Publisher ID、
+  `SignatureKind=Store`、`Status=Ok`、版本、x64/ARM64 架构、App ID 和真实
+  `ChatGPT.exe` 全部有效时才输出 `installed + trusted`；异常包进入
+  `needs_repair/blocked`。
+- macOS 增加 `com.openai.codex`、Team ID `2DC432GLL2`、版本和启动文件检测；
+  当前开发机严格深层签名返回异常，保持为全新官方下载样本待验证门禁。
+- Rust 测试增加到 49 通过、0 失败、1 个本地 Ollama live test 忽略；Windows
+  ARM64/x64 两目标结果一致。
+- 源提交 `9c3737a` 的 Windows ARM64/x64 候选 SHA256 分别为
+  `308231906cb1425d289322c99a2d2c6568bb9e4b648ecbc78bb75ad0c3acd24f` 和
+  `80420c2a36dbcbc395b58574d5a45d4a77ac642d5b1b8854abf1c8b06db153d2`。
+- ARM64 原生与 x64 兼容层静默安装不自启、首次响应、单实例和 UI E2E 通过；两者
+  均确认已安装统一版为 `installed/trusted/microsoft-store`，setup 的
+  `install_chatgpt` 阶段为 `skipped`，配置期间 ChatGPT 进程为 0。VM 最终恢复
+  ARM64 原生候选；真实 x64 仍是发布门禁。
+- OpenAI 下载页当前返回 1,462,848 字节的 Microsoft `Store Installer` 引导程序；
+  实测 Authenticode 为 `Valid`，不是可重托管的完整离线包。此证据用于 `WP-202`，
+  当前工作包未改变安装来源。
 
 ## GitHub 追踪
 

@@ -14,6 +14,9 @@ pub struct SystemStatusInput {
     pub platform: String,
     pub architecture: String,
     pub app_installed: bool,
+    pub app_state: String,
+    pub app_trusted: bool,
+    pub app_source: String,
     pub app_name: String,
     pub app_version: Option<String>,
     pub app_detail: String,
@@ -110,10 +113,15 @@ impl SystemStatusV1 {
     pub fn from_input(input: SystemStatusInput) -> Self {
         let ready = !input.transaction_recovery_failed
             && input.app_installed
+            && input.app_trusted
+            && input.app_state == "installed"
             && input.config_present
             && input.router_reachable
             && input.router_responses_verified;
-        let overall = if input.transaction_recovery_failed {
+        let overall = if input.transaction_recovery_failed
+            || input.app_state == "needs_repair"
+            || input.app_state == "unsupported"
+        {
             "blocked"
         } else if ready {
             "ready"
@@ -123,11 +131,6 @@ impl SystemStatusV1 {
             "action_required"
         };
         let recommended_action = recommended_action(&input, ready);
-        let app_state = if input.app_installed {
-            "installed"
-        } else {
-            "missing"
-        };
         let router_state = if input.router_reachable && input.router_responses_verified {
             "responses_verified"
         } else if input.router_reachable {
@@ -151,18 +154,13 @@ impl SystemStatusV1 {
             platform: input.platform.clone(),
             architecture: input.architecture.clone(),
             app: AppStatusV1 {
-                state: app_state.to_string(),
+                state: input.app_state.clone(),
                 installed: input.app_installed,
                 name: input.app_name.clone(),
                 version: input.app_version.clone(),
                 detail: input.app_detail.clone(),
-                trusted: input.app_installed,
-                source: if input.app_installed {
-                    "official-package"
-                } else {
-                    "not-detected"
-                }
-                .to_string(),
+                trusted: input.app_trusted,
+                source: input.app_source.clone(),
             },
             router: RouterStatusV1 {
                 state: router_state.to_string(),
@@ -204,6 +202,10 @@ impl SystemStatusV1 {
 fn recommended_action(input: &SystemStatusInput, ready: bool) -> RecommendedActionV1 {
     let (id, label) = if input.transaction_recovery_failed {
         ("open_diagnostics", "查看恢复详情")
+    } else if input.app_state == "needs_repair" {
+        ("open_diagnostics", "查看修复方案")
+    } else if input.app_state == "unsupported" {
+        ("open_install_guide", "查看解决方案")
     } else if ready {
         ("open_chatgpt", "打开 ChatGPT")
     } else if !input.app_installed && input.platform == "Windows" {
@@ -820,6 +822,19 @@ mod tests {
             platform: "Windows".to_string(),
             architecture: "aarch64".to_string(),
             app_installed,
+            app_state: if app_installed {
+                "installed"
+            } else {
+                "not_installed"
+            }
+            .to_string(),
+            app_trusted: app_installed,
+            app_source: if app_installed {
+                "microsoft-store"
+            } else {
+                "not-detected"
+            }
+            .to_string(),
             app_name: "ChatGPT".to_string(),
             app_version: Some("1.0".to_string()),
             app_detail: "test".to_string(),
@@ -881,6 +896,15 @@ mod tests {
         );
         assert_eq!(rollback_status.recommended_action.id, "open_diagnostics");
         assert!(!rollback_status.legacy.ready);
+
+        let mut needs_repair = status_input(false, true, true);
+        needs_repair.app_state = "needs_repair".to_string();
+        needs_repair.app_source = "microsoft-store".to_string();
+        let repair_status = SystemStatusV1::from_input(needs_repair);
+        assert_eq!(repair_status.overall, "blocked");
+        assert_eq!(repair_status.app.state, "needs_repair");
+        assert!(!repair_status.app.trusted);
+        assert_eq!(repair_status.recommended_action.id, "open_diagnostics");
     }
 
     #[test]

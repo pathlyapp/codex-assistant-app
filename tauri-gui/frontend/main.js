@@ -206,6 +206,7 @@ async function refreshStatus({ hydrateForm = false } = {}) {
 
 function renderSystemStatus(status) {
   const ready = status.overall === "ready";
+  const appNeedsRepair = status.appState === "needs_repair";
   const recommendedAction = status.recommendedAction || {
     id: ready ? "open_chatgpt" : "configure_router",
     label: ready ? "打开 ChatGPT" : "开始配置",
@@ -219,12 +220,13 @@ function renderSystemStatus(status) {
     );
   } else {
     const missing = [];
-    if (!status.appInstalled) missing.push("ChatGPT");
+    if (appNeedsRepair) missing.push("ChatGPT 安装需要修复");
+    else if (!status.appInstalled) missing.push("ChatGPT");
     if (!status.configPresent) missing.push("Codex 配置");
     if (!status.routerReachable) missing.push("Router 连接");
     setReadiness(
       "attention",
-      status.overall === "blocked" ? "Router 当前不可用" : "还需要完成配置",
+      appNeedsRepair ? "ChatGPT 安装需要修复" : status.overall === "blocked" ? "Router 当前不可用" : "还需要完成配置",
       `待处理：${missing.join("、") || "重新检查状态"}`,
       recommendedAction.label,
     );
@@ -234,8 +236,17 @@ function renderSystemStatus(status) {
   overall.textContent = ready ? "全部正常" : "需要处理";
   overall.className = `status-badge ${ready ? "success" : "warning"}`;
 
-  setStatusCard("app", status.appInstalled, status.appInstalled ? "ChatGPT 已安装" : "未检测到 ChatGPT", status.appDetail);
-  $("#appInstallButton").classList.toggle("hidden", status.appInstalled || status.platform !== "Windows");
+  setStatusCard(
+    "app",
+    status.appInstalled,
+    status.appInstalled ? "ChatGPT 已安装" : appNeedsRepair ? "ChatGPT 安装异常" : "未检测到 ChatGPT",
+    status.appDetail,
+    appNeedsRepair ? "error" : "warning",
+  );
+  $("#appInstallButton").classList.toggle(
+    "hidden",
+    status.appInstalled || status.platform !== "Windows" || appNeedsRepair,
+  );
   setStatusCard(
     "router",
     status.routerReachable,
@@ -255,7 +266,7 @@ function renderSystemStatus(status) {
   $("#restoreConfigButton").classList.toggle("hidden", !status.backupAvailable);
   $("#diagnosticRestoreButton").disabled = !status.backupAvailable;
   $("#diagPlatform").textContent = `${status.platform} · ${formatArchitecture(status.architecture)}`;
-  $("#diagApp").textContent = `${status.appInstalled ? "正常" : "未安装"} · ${status.appDetail}`;
+  $("#diagApp").textContent = `${status.appInstalled ? "正常" : appNeedsRepair ? "需要修复" : "未安装"} · ${status.appDetail}`;
   $("#diagConfig").textContent = status.configPresent ? `有效 · ${status.configuredModel}` : "未配置";
   $("#diagRouter").textContent = `${status.routerReachable ? "正常" : "异常"} · ${status.routerDetail}`;
   $("#diagConfigPath").textContent = status.configPath;
@@ -273,12 +284,12 @@ function setReadiness(kind, title, detail, action) {
   $("#readinessPanel .readiness-icon .icon").classList.toggle("spin", kind === "loading");
 }
 
-function setStatusCard(prefix, ok, title, detail) {
+function setStatusCard(prefix, ok, title, detail, failureKind = "warning") {
   $(`#${prefix}StatusTitle`).textContent = title;
   $(`#${prefix}StatusDetail`).textContent = detail;
   const badge = $(`#${prefix}StatusBadge`);
   badge.textContent = ok ? "正常" : "待处理";
-  badge.className = `status-badge ${ok ? "success" : "warning"}`;
+  badge.className = `status-badge ${ok ? "success" : failureKind}`;
 }
 
 function renderStatusError(error) {
@@ -307,9 +318,21 @@ function renderSetupPrerequisites(status) {
 
   $("#setupEnvironmentDetail").textContent = `${status.platform} · ${formatArchitecture(status.architecture)}`;
   setBadge($("#setupEnvironmentState"), "可用", "success");
-  $("#setupAppDetail").textContent = status.appInstalled ? status.appDetail : "未检测到 ChatGPT 官方应用";
-  setBadge($("#setupAppState"), status.appInstalled ? "已安装" : "待安装", status.appInstalled ? "success" : "warning");
-  $("#setupInstallButton").classList.toggle("hidden", status.appInstalled || status.platform !== "Windows");
+  const appNeedsRepair = status.appState === "needs_repair";
+  $("#setupAppDetail").textContent = status.appInstalled
+    ? status.appDetail
+    : appNeedsRepair
+      ? status.appDetail
+      : "未检测到 ChatGPT 官方应用";
+  setBadge(
+    $("#setupAppState"),
+    status.appInstalled ? "已安装" : appNeedsRepair ? "需修复" : "待安装",
+    status.appInstalled ? "success" : appNeedsRepair ? "error" : "warning",
+  );
+  $("#setupInstallButton").classList.toggle(
+    "hidden",
+    status.appInstalled || status.platform !== "Windows" || appNeedsRepair,
+  );
 
   if (!status.appInstalled) {
     setGuidedStep("app");
@@ -352,6 +375,7 @@ function onOverviewAction() {
       installChatGPT({ continueToSetup: true });
       break;
     case "open_install_guide":
+    case "open_diagnostics":
       navigate("diagnostics");
       break;
     default:
@@ -1264,7 +1288,7 @@ async function copyDiagnostics() {
     `Status schema: ${status.schemaVersion || "legacy"}`,
     `Platform: ${status.platform} ${formatArchitecture(status.architecture)}`,
     `Overall: ${status.overall || (status.ready ? "ready" : "action_required")}`,
-    `ChatGPT: ${status.appInstalled ? "installed" : "missing"} (${redactDiagnosticText(status.appDetail)})`,
+    `ChatGPT: state=${status.appState || (status.appInstalled ? "installed" : "not_installed")} trusted=${Boolean(status.appTrusted)} source=${status.appSource || "unknown"} (${redactDiagnosticText(status.appDetail)})`,
     `Codex config: ${status.config?.state || (status.configPresent ? "valid" : "missing")}`,
     `Config source: ${status.config?.effectiveSource || "unknown"}`,
     `Router: ${status.router?.state || (status.routerReachable ? "reachable" : "unreachable")} (${redactDiagnosticText(status.routerDetail)})`,
@@ -1405,6 +1429,9 @@ function normalizeSystemStatus(status = {}) {
     return {
       ...status,
       appInstalled: Boolean(status.app.installed),
+      appState: status.app.state || (status.app.installed ? "installed" : "not_installed"),
+      appTrusted: Boolean(status.app.trusted),
+      appSource: status.app.source || "unknown",
       appName: status.app.name || "ChatGPT",
       appVersion: status.app.version || null,
       appDetail: status.app.detail || "",
@@ -1430,6 +1457,9 @@ function normalizeSystemStatus(status = {}) {
     ...status,
     schemaVersion: status.schemaVersion || 0,
     overall: ready ? "ready" : "action_required",
+    appState: status.appInstalled ? "installed" : "not_installed",
+    appTrusted: Boolean(status.appInstalled),
+    appSource: status.appInstalled ? "legacy-detection" : "not-detected",
     recommendedAction: status.recommendedAction || action,
   };
 }
