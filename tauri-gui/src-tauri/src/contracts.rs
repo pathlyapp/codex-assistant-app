@@ -262,6 +262,14 @@ fn classify_legacy_error(stage: &str, detail: &str) -> &'static str {
     if lower.contains("diagnostic_secret_detected") || lower.contains("诊断包检测到疑似密钥")
     {
         "DIAGNOSTIC_SECRET_DETECTED"
+    } else if stage == "repair_execute"
+        && (lower.contains("没有可安全执行") || lower.contains("not available"))
+    {
+        "REPAIR_NOT_AVAILABLE"
+    } else if stage == "repair_execute"
+        && (lower.contains("方案已随系统状态变化") || lower.contains("plan is stale"))
+    {
+        "REPAIR_PLAN_STALE"
     } else if stage == "diagnostics_export" {
         "DIAGNOSTIC_EXPORT_FAILED"
     } else if stage.starts_with("appearance_") {
@@ -400,6 +408,10 @@ fn classify_legacy_error(stage: &str, detail: &str) -> &'static str {
         "SECRET_STORE_FAILED"
     } else if lower.contains("复核失败") || lower.contains("verify") {
         "CONFIG_VERIFY_FAILED"
+    } else if stage == "repair_plan" {
+        "REPAIR_PLAN_FAILED"
+    } else if stage == "repair_execute" {
+        "REPAIR_EXECUTION_FAILED"
     } else if stage == "install_chatgpt" {
         "APP_INSTALL_FAILED"
     } else {
@@ -612,6 +624,30 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
             "助手无法把诊断包写入系统下载目录，请检查磁盘空间和目录权限后重试。",
             true,
             "retry_diagnostics",
+        ),
+        "REPAIR_NOT_AVAILABLE" => (
+            "当前不需要执行这项修复",
+            "系统状态已经变化，请重新检查并使用最新建议。",
+            true,
+            "refresh_repair_plan",
+        ),
+        "REPAIR_PLAN_STALE" => (
+            "修复方案已更新",
+            "执行前复核发现系统状态已经变化，请重新检查后再继续。",
+            true,
+            "refresh_repair_plan",
+        ),
+        "REPAIR_PLAN_FAILED" => (
+            "暂时无法生成修复方案",
+            "助手无法完整读取当前状态，请重新检查或导出诊断包。",
+            true,
+            "retry_repair_plan",
+        ),
+        "REPAIR_EXECUTION_FAILED" => (
+            "修复未能完成",
+            "系统状态没有确认恢复，请重新检查并在仍失败时导出诊断包。",
+            true,
+            "retry_repair",
         ),
         "APPEARANCE_UNSUPPORTED" => (
             "当前环境不支持主题功能",
@@ -1001,6 +1037,18 @@ mod tests {
             ErrorEnvelopeV1::from_legacy("diagnostics_export", "无法写入系统下载目录");
         assert_eq!(diagnostic_write.code, "DIAGNOSTIC_EXPORT_FAILED");
         assert_eq!(diagnostic_write.suggested_action, "retry_diagnostics");
+
+        let repair_stale =
+            ErrorEnvelopeV1::from_legacy("repair_execute", "修复方案已随系统状态变化");
+        assert_eq!(repair_stale.code, "REPAIR_PLAN_STALE");
+        assert_eq!(repair_stale.suggested_action, "refresh_repair_plan");
+
+        let repair_missing =
+            ErrorEnvelopeV1::from_legacy("repair_execute", "当前状态没有可安全执行的自动修复动作");
+        assert_eq!(repair_missing.code, "REPAIR_NOT_AVAILABLE");
+
+        let repair_plan = ErrorEnvelopeV1::from_legacy("repair_plan", "读取外观状态任务失败");
+        assert_eq!(repair_plan.code, "REPAIR_PLAN_FAILED");
     }
 
     #[test]

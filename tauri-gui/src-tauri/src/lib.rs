@@ -27,6 +27,7 @@ mod contracts;
 mod diagnostics;
 mod official_app;
 mod official_installer;
+mod repair;
 mod router_client;
 mod token_support;
 
@@ -38,6 +39,11 @@ use contracts::{
 use diagnostics::{DiagnosticBundle, DiagnosticExportRequest};
 use official_app::{detect_chatgpt_app, DesktopAppInfo};
 use official_installer::{install_official_chatgpt, preferred_installer_availability};
+use repair::{
+    plan_repair, snapshot as repair_snapshot, RepairPlanRequest, RepairPlanV1, RepairResultV1,
+    RepairRunRequest, ACTION_CLEAR_APPEARANCE_SESSION, ACTION_RECHECK_OFFICIAL_APP,
+    ACTION_RESTORE_CONFIGURATION, ACTION_REVALIDATE_ROUTER,
+};
 use router_client::{ResponsesProbeResult, RouterClient};
 
 const VERSION: &str = "0.8.8";
@@ -516,6 +522,25 @@ async fn export_diagnostics(
 }
 
 #[tauri::command]
+async fn get_repair_plan(request: RepairPlanRequest) -> Result<RepairPlanV1, ErrorEnvelopeV1> {
+    tauri::async_runtime::spawn_blocking(move || get_repair_plan_inner(&request))
+        .await
+        .map_err(|error| command_error("repair_plan", format!("生成修复方案失败: {error}")))?
+        .map_err(|error| command_error("repair_plan", error))
+}
+
+#[tauri::command]
+async fn run_repair(
+    app: AppHandle,
+    request: RepairRunRequest,
+) -> Result<RepairResultV1, ErrorEnvelopeV1> {
+    tauri::async_runtime::spawn_blocking(move || run_repair_inner(&app, &request))
+        .await
+        .map_err(|error| command_error("repair_execute", format!("执行修复任务失败: {error}")))?
+        .map_err(|error| command_error("repair_execute", error))
+}
+
+#[tauri::command]
 async fn discover_models(request: GatewayProbeRequest) -> Result<ModelDiscovery, ErrorEnvelopeV1> {
     tauri::async_runtime::spawn_blocking(move || discover_models_inner(request))
         .await
@@ -740,6 +765,123 @@ fn export_diagnostics_inner(
     )?;
     diagnostics::save_bundle(&mut bundle, download_directory)?;
     Ok(bundle)
+}
+
+fn get_repair_plan_inner(request: &RepairPlanRequest) -> Result<RepairPlanV1, String> {
+    let status = collect_system_status()?;
+    let appearance = collect_appearance_status()?;
+    Ok(plan_repair(
+        &status,
+        &request.error_code,
+        &appearance.selected_theme,
+    ))
+}
+
+fn run_repair_inner(app: &AppHandle, request: &RepairRunRequest) -> Result<RepairResultV1, String> {
+    let before_status = collect_system_status()?;
+    let before_appearance = collect_appearance_status()?;
+    let plan = plan_repair(
+        &before_status,
+        &request.error_code,
+        &before_appearance.selected_theme,
+    );
+    let planned_action = plan
+        .action
+        .ok_or_else(|| "当前状态没有可安全执行的自动修复动作".to_string())?;
+    if planned_action.id != request.action_id {
+        return Err("修复方案已随系统状态变化，请重新检查后再执行".to_string());
+    }
+    let before = repair_snapshot(&before_status, &before_appearance.selected_theme);
+    emit_log(app, format!("[REPAIR] Starting {}\n", planned_action.id));
+
+    let summary = match planned_action.id.as_str() {
+        ACTION_RECHECK_OFFICIAL_APP => {
+            let detected = detect_chatgpt_app()?;
+            if detected.installed && detected.trusted {
+                "官方应用已重新检测并通过可信验证".to_string()
+            } else {
+                format!("已重新检测官方应用，当前仍需处理：{}", detected.detail)
+            }
+        }
+        ACTION_REVALIDATE_ROUTER => revalidate_saved_router()?,
+        ACTION_RESTORE_CONFIGURATION => restore_codex_config_inner()?.message,
+        ACTION_CLEAR_APPEARANCE_SESSION => clear_appearance_session()?,
+        _ => return Err("修复动作不受支持".to_string()),
+    };
+
+    let after_status = collect_system_status()?;
+    let after_appearance = collect_appearance_status()?;
+    let after = repair_snapshot(&after_status, &after_appearance.selected_theme);
+    let changed = before != after || planned_action.id == ACTION_RESTORE_CONFIGURATION;
+    emit_log(
+        app,
+        format!(
+            "[REPAIR] Completed {} changed={changed}\n",
+            planned_action.id
+        ),
+    );
+    Ok(RepairResultV1 {
+        schema_version: SCHEMA_VERSION_V1,
+        action_id: planned_action.id,
+        success: true,
+        changed,
+        summary,
+        before,
+        after,
+    })
+}
+
+fn revalidate_saved_router() -> Result<String, String> {
+    let paths = resolve_paths()?;
+    let mut state = read_state(&paths).map_err(|error| format!("读取 Router 配置失败: {error}"))?;
+    if !codex_config_matches(&paths.codex_config_path, &state) {
+        return Err("当前 Codex 配置与助手状态不一致，请先恢复或重新配置".to_string());
+    }
+    let bearer = gateway_bearer_from_state(&state)?;
+    let client = RouterClient::new(&state.gateway_base_url, bearer.as_deref());
+    let models = client.fetch_models()?;
+    if !models.iter().any(|model| model == &state.model) {
+        invalidate_responses_evidence(&state.gateway_base_url, &state.model)?;
+        return Err(format!(
+            "Router 未返回已配置模型“{}”，请返回配置页重新选择",
+            state.model
+        ));
+    }
+    let probe = match client.probe_responses(&state.model) {
+        Ok(probe) => probe,
+        Err(error) => {
+            invalidate_responses_evidence(&state.gateway_base_url, &state.model)?;
+            return Err(error);
+        }
+    };
+    state.responses_verified_at = Some(rfc3339_timestamp()?);
+    state.responses_protocol = Some(probe.protocol.clone());
+    write_state(&paths, &state)?;
+    Ok(format!(
+        "Router 已重新验证，模型 {} 可用，协议为 {}",
+        state.model, probe.protocol
+    ))
+}
+
+fn clear_appearance_session() -> Result<String, String> {
+    let paths = resolve_paths()?;
+    let current = read_appearance_state(&paths).unwrap_or(AppearanceState {
+        version: VERSION.to_string(),
+        selected_theme: "official".to_string(),
+        port: APPEARANCE_PORT,
+        applied_at: String::new(),
+    });
+    if current.selected_theme == "official" {
+        return Ok("当前已经使用官方外观，无需清理".to_string());
+    }
+    let official = AppearanceState {
+        version: VERSION.to_string(),
+        selected_theme: "official".to_string(),
+        port: APPEARANCE_PORT,
+        applied_at: unix_timestamp(),
+    };
+    write_appearance_state(&paths, &official)?;
+    Ok("已清除失效主题会话，后续将使用 ChatGPT 官方外观".to_string())
 }
 
 fn discover_models_inner(request: GatewayProbeRequest) -> Result<ModelDiscovery, String> {
@@ -1810,8 +1952,11 @@ fn read_appearance_state(paths: &InstallerPaths) -> Result<AppearanceState, Stri
 fn write_appearance_state(paths: &InstallerPaths, state: &AppearanceState) -> Result<(), String> {
     let data = serde_json::to_string_pretty(state)
         .map_err(|error| format!("生成外观状态失败: {error}"))?;
-    fs::write(appearance_state_path(paths), format!("{data}\n"))
-        .map_err(|error| format!("保存外观状态失败: {error}"))
+    config_transaction::atomic_write(
+        &appearance_state_path(paths),
+        format!("{data}\n").as_bytes(),
+    )
+    .map_err(|error| format!("保存外观状态失败: {error}"))
 }
 
 fn theme_directory(paths: &InstallerPaths) -> PathBuf {
@@ -3704,6 +3849,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_system_status,
             export_diagnostics,
+            get_repair_plan,
+            run_repair,
             discover_models,
             start_setup,
             install_chatgpt_app,

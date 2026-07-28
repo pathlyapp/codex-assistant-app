@@ -87,6 +87,10 @@ const state = {
   confirmResolver: null,
   confirmReturnFocus: null,
   lastResultPayload: null,
+  lastErrorEnvelope: null,
+  repairPlan: null,
+  repairRequestId: 0,
+  repairing: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -118,7 +122,7 @@ function bindUi() {
   $("#setupInstallButton").addEventListener("click", () => installChatGPT({ continueToSetup: true }));
   $("#editConfigButton").addEventListener("click", () => navigate("setup"));
   $("#restoreConfigButton").addEventListener("click", restoreConfiguration);
-  $("#diagnosticRestoreButton").addEventListener("click", restoreConfiguration);
+  $("#repairActionButton").addEventListener("click", runRecommendedRepair);
   $("#routerForm").addEventListener("submit", applyConfiguration);
   $("#testRouterButton").addEventListener("click", () => testRouter({ announce: true }));
   $("#noAuthInput").addEventListener("change", updateAuthFields);
@@ -182,6 +186,7 @@ function navigate(view) {
     loadGalleryThemes();
   }
   if (view === "setup") renderSetupPrerequisites(state.status);
+  if (view === "diagnostics" && state.status) refreshRepairPlan();
 }
 
 async function refreshStatus({ hydrateForm = false } = {}) {
@@ -195,10 +200,12 @@ async function refreshStatus({ hydrateForm = false } = {}) {
     state.status = status;
     renderSystemStatus(status);
     if (!state.formDirty) hydrateRouterForm(status);
+    await refreshRepairPlan();
   } catch (error) {
     setReadiness("attention", "状态检查失败", friendlyError(error), "重新检查");
     $("#overviewAction").disabled = false;
     renderStatusError(error);
+    renderRepairPlanError(error);
   } finally {
     button.disabled = false;
     button.classList.remove("spinning");
@@ -265,7 +272,6 @@ function renderSystemStatus(status) {
   $("#currentModel").textContent = status.configuredModel || "未配置";
   $("#currentKeyState").textContent = status.keyConfigured ? "已安全保存" : status.configPresent ? "无需 Key" : "未配置";
   $("#restoreConfigButton").classList.toggle("hidden", !status.backupAvailable);
-  $("#diagnosticRestoreButton").disabled = !status.backupAvailable;
   $("#diagPlatform").textContent = `${status.platform} · ${formatArchitecture(status.architecture)}`;
   $("#diagApp").textContent = `${status.appInstalled ? "正常" : appNeedsRepair ? "需要修复" : "未安装"} · ${status.appDetail}`;
   $("#diagConfig").textContent = status.configPresent ? `有效 · ${status.configuredModel}` : "未配置";
@@ -381,6 +387,125 @@ function onOverviewAction() {
       break;
     default:
       navigate("setup");
+  }
+}
+
+async function refreshRepairPlan() {
+  if (!tauri?.core || !state.status) return;
+  const requestId = ++state.repairRequestId;
+  const errorCode = state.lastErrorEnvelope?.code || state.lastResultPayload?.error?.code || "";
+  renderRepairPlanLoading();
+  try {
+    const plan = await tauri.core.invoke("get_repair_plan", {
+      request: { errorCode },
+    });
+    if (requestId !== state.repairRequestId) return;
+    state.repairPlan = plan;
+    renderRepairPlan(plan);
+  } catch (error) {
+    if (requestId !== state.repairRequestId) return;
+    state.repairPlan = null;
+    renderRepairPlanError(error);
+  }
+}
+
+function renderRepairPlanLoading() {
+  const panel = $("#repairPanel");
+  panel.className = "repair-panel";
+  setBadge($("#repairState"), "检查中", "pending");
+  $("#repairTitle").textContent = "正在生成修复方案";
+  $("#repairDetail").textContent = "助手会根据当前系统状态选择一个安全的处理动作。";
+  $("#repairErrorCode").classList.add("hidden");
+  $("#repairActionButton").classList.add("hidden");
+}
+
+function renderRepairPlan(plan) {
+  const panel = $("#repairPanel");
+  panel.className = `repair-panel ${String(plan.state || "").replaceAll("_", "-")}`;
+  const labels = {
+    action_available: ["可自动修复", "warning"],
+    manual_required: ["需人工处理", "warning"],
+    not_needed: ["无需修复", "success"],
+  };
+  const [label, kind] = labels[plan.state] || ["已检查", "neutral"];
+  setBadge($("#repairState"), label, kind);
+  $("#repairTitle").textContent = plan.title || "修复方案";
+  $("#repairDetail").textContent = plan.detail || "暂无可执行动作。";
+  const code = $("#repairErrorCode");
+  code.textContent = plan.errorCode || "";
+  code.classList.toggle("hidden", !plan.errorCode);
+  const button = $("#repairActionButton");
+  button.classList.toggle("hidden", !plan.action);
+  button.disabled = state.repairing || !plan.action;
+  if (plan.action) {
+    button.querySelector("span:last-child").textContent = plan.action.label;
+    button.dataset.actionId = plan.action.id;
+  } else {
+    button.dataset.actionId = "";
+  }
+}
+
+function renderRepairPlanError(error) {
+  const panel = $("#repairPanel");
+  panel.className = "repair-panel manual-required";
+  setBadge($("#repairState"), "检查失败", "error");
+  $("#repairTitle").textContent = "暂时无法生成修复方案";
+  $("#repairDetail").textContent = friendlyError(error);
+  $("#repairErrorCode").classList.add("hidden");
+  $("#repairActionButton").classList.add("hidden");
+}
+
+async function runRecommendedRepair() {
+  const action = state.repairPlan?.action;
+  if (!tauri?.core || !action || state.repairing) return;
+  if (action.requiresConfirmation) {
+    const confirmed = await requestConfirmation({
+      title: `${action.label}？`,
+      message: action.description,
+      confirmLabel: action.label,
+    });
+    if (!confirmed) return;
+  }
+
+  const button = $("#repairActionButton");
+  const resultNode = $("#repairResult");
+  state.repairing = true;
+  button.disabled = true;
+  button.querySelector(".icon").innerHTML = ICONS.loader;
+  button.querySelector(".icon").classList.add("spin");
+  resultNode.className = "repair-result hidden";
+  resultNode.dataset.actionId = "";
+  resultNode.dataset.changed = "";
+  resultNode.dataset.beforeRouterState = "";
+  resultNode.dataset.afterRouterState = "";
+  try {
+    const result = await tauri.core.invoke("run_repair", {
+      request: {
+        actionId: action.id,
+        errorCode: state.repairPlan.errorCode || "",
+      },
+    });
+    state.formDirty = false;
+    await refreshStatus({ hydrateForm: true });
+    resultNode.textContent = result.changed
+      ? `修复完成，状态已更新：${result.summary}`
+      : `检查完成，系统状态未变化：${result.summary}`;
+    resultNode.dataset.actionId = result.actionId || "";
+    resultNode.dataset.changed = String(Boolean(result.changed));
+    resultNode.dataset.beforeRouterState = result.before?.routerState || "";
+    resultNode.dataset.afterRouterState = result.after?.routerState || "";
+    resultNode.className = "repair-result";
+    showToast(result.changed ? "修复已完成" : "检查已完成");
+  } catch (error) {
+    resultNode.textContent = friendlyError(error);
+    resultNode.className = "repair-result error";
+    showToast(friendlyError(error), true);
+    await refreshRepairPlan();
+  } finally {
+    state.repairing = false;
+    button.querySelector(".icon").classList.remove("spin");
+    button.querySelector(".icon").innerHTML = ICONS.refresh;
+    if (state.repairPlan) renderRepairPlan(state.repairPlan);
   }
 }
 
@@ -675,6 +800,8 @@ async function finishRun(payload) {
   if (state.finishedHandled) return;
   state.finishedHandled = true;
   state.running = false;
+  state.lastResultPayload = payload;
+  state.lastErrorEnvelope = payload.error || null;
   if (Array.isArray(payload.stages)) {
     payload.stages.forEach((stage) => {
       state.tasks[stage.stage] = normalizedStatus(stage.status);
@@ -683,7 +810,7 @@ async function finishRun(payload) {
   }
   renderTasks();
   setUiRunning(false);
-  if (payload.success) await refreshStatus({ hydrateForm: false });
+  await refreshStatus({ hydrateForm: false });
   showResult(payload);
 }
 
@@ -909,7 +1036,7 @@ async function restoreConfiguration() {
     confirmLabel: "恢复并重启",
   });
   if (!confirmed) return;
-  const buttons = [$("#restoreConfigButton"), $("#diagnosticRestoreButton")];
+  const buttons = [$("#restoreConfigButton")];
   buttons.forEach((button) => {
     button.disabled = true;
   });
@@ -1235,6 +1362,7 @@ async function applyAppearance() {
     $("#appearanceMessage").textContent = appearance.message;
     showToast("ChatGPT 外观已更新");
   } catch (error) {
+    state.lastErrorEnvelope = errorEnvelope(error);
     badge.textContent = "应用失败";
     badge.className = "status-badge error";
     $("#appearanceMessage").textContent = friendlyError(error);

@@ -469,6 +469,33 @@ if ($ExpectSetupFailure) {
       $statusAfterFailure.ready) {
     throw "SystemStatusV1 retained stale readiness after a failed Responses probe: $($statusAfterFailure | ConvertTo-Json -Compress)"
   }
+  $repairAfterFailure = Invoke-CdpExpression $socket @'
+(async () => {
+  const plan = await window.__TAURI__.core.invoke('get_repair_plan', {
+    request: { errorCode: 'ROUTER_RESPONSES_UNSUPPORTED' }
+  });
+  document.querySelector('[data-view="diagnostics"]').click();
+  const deadline = Date.now() + 10000;
+  const button = document.querySelector('#repairActionButton');
+  while (button.classList.contains('hidden') && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return {
+    planState: plan.state,
+    actionId: plan.action?.id || '',
+    buttonVisible: !button.classList.contains('hidden'),
+    buttonActionId: button.dataset.actionId || '',
+    fixedRestoreAbsent: !document.querySelector('#diagnosticRestoreButton')
+  };
+})()
+'@ 23
+  if ($repairAfterFailure.planState -ne "action_available" -or
+      $repairAfterFailure.actionId -ne "revalidate_router" -or
+      !$repairAfterFailure.buttonVisible -or
+      $repairAfterFailure.buttonActionId -ne "revalidate_router" -or
+      !$repairAfterFailure.fixedRestoreAbsent) {
+    throw "Router failure did not produce one targeted repair action: $($repairAfterFailure | ConvertTo-Json -Compress)"
+  }
   $socket.Dispose()
   [pscustomobject]@{
     success = $true
@@ -480,6 +507,7 @@ if ($ExpectSetupFailure) {
     failedMessage = $result.failedMessage
     configUnchanged = $true
     evidenceInvalidated = $true
+    targetedRepair = $repairAfterFailure
     systemStatus = $statusAfterFailure
     chatGptProcessCountDuringSetup = $chatGptAfter
   } | ConvertTo-Json -Depth 5 -Compress
@@ -503,12 +531,16 @@ $backupUiVisible = Invoke-CdpExpression $socket @'
   while (refresh.disabled && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
   return {
     home: !document.querySelector('#restoreConfigButton').classList.contains('hidden'),
-    diagnostics: !document.querySelector('#diagnosticRestoreButton').disabled
+    targetedRepairPanel: Boolean(document.querySelector('#repairPanel')),
+    fixedDiagnosticRestoreAbsent: !document.querySelector('#diagnosticRestoreButton')
   };
 })()
 '@ 6
-if ($hadConfigBefore -and (!$backupUiVisible.home -or !$backupUiVisible.diagnostics)) {
-  throw "Configuration backup was written but the restore actions are not available in the UI"
+if ($hadConfigBefore -and !$backupUiVisible.home) {
+  throw "Configuration backup was written but the reversible home action is unavailable"
+}
+if (!$backupUiVisible.targetedRepairPanel -or !$backupUiVisible.fixedDiagnosticRestoreAbsent) {
+  throw "Diagnostics does not use the targeted repair panel"
 }
 
 if (!(Test-Path $configPath)) { throw "Codex config was not written" }
@@ -904,7 +936,8 @@ $socket.Dispose()
   localOllamaDiagnostic = $connection.localOllamaDiagnostic
   chatGptProcessCountDuringSetup = $chatGptAfter
   chatGptLaunchedAfterExplicitAction = $chatGptLaunched
-  backupAvailableInUi = [bool]($backupUiVisible.home -and $backupUiVisible.diagnostics)
+  backupAvailableInUi = [bool]$backupUiVisible.home
+  targetedRepairPanel = [bool]($backupUiVisible.targetedRepairPanel -and $backupUiVisible.fixedDiagnosticRestoreAbsent)
   diagnosticSupportId = $diagnosticBundle.supportId
   diagnosticBundleSha256 = $diagnosticBundle.sha256
   diagnosticUiDownloadSha256 = $diagnosticUiDownloadSha256

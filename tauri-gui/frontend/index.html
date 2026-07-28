@@ -292,6 +292,20 @@
             </div>
             <button id="runDiagnosticsButton" class="secondary-button" type="button"><span class="icon" data-icon="activity"></span><span>重新检查</span></button>
           </div>
+          <section id="repairPanel" class="repair-panel" aria-labelledby="repairTitle">
+            <div class="repair-panel-copy">
+              <div class="repair-panel-heading">
+                <span id="repairState" class="status-badge pending">检查中</span>
+                <code id="repairErrorCode" class="hidden"></code>
+              </div>
+              <h3 id="repairTitle">正在生成修复方案</h3>
+              <p id="repairDetail">助手会根据当前系统状态选择一个安全的处理动作。</p>
+              <div id="repairResult" class="repair-result hidden" role="status"></div>
+            </div>
+            <button id="repairActionButton" class="primary-button hidden" type="button">
+              <span class="icon" data-icon="refresh"></span><span>执行修复</span>
+            </button>
+          </section>
           <div class="diagnostic-list">
             <div><span>操作系统</span><strong id="diagPlatform">检查中</strong></div>
             <div><span>ChatGPT</span><strong id="diagApp">检查中</strong></div>
@@ -303,7 +317,6 @@
           <div class="diagnostic-actions">
             <button id="diagnosticCopyButton" class="secondary-button" type="button"><span class="icon" data-icon="copy"></span><span>复制诊断信息</span></button>
             <button id="diagnosticExportButton" class="secondary-button" type="button"><span class="icon" data-icon="download"></span><span>导出诊断包</span></button>
-            <button id="diagnosticRestoreButton" class="secondary-button" type="button" disabled><span class="icon" data-icon="rotateCcw"></span><span>恢复上次配置</span></button>
           </div>
           <section class="danger-zone" aria-labelledby="dangerZoneTitle">
             <div class="danger-zone-head">

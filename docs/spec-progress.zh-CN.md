@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@e6a2bcb` |
+| 开发基线 | `main@0515b8b` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m6-diagnostic-bundle` |
-| 当前 PR | [#21](https://github.com/theivanxu/codex-assistant/pull/21) |
+| 当前分支 | `feat/m6-targeted-repairs` |
+| 当前 PR | [#22](https://github.com/theivanxu/codex-assistant/pull/22) |
 | 当前应用版本 | `0.8.8` |
 | 下一内部候选 | `0.9.0-alpha.1` |
-| 当前主里程碑 | M6 脱敏诊断包；M0-M5 外部门禁 |
+| 当前主里程碑 | M6 定向修复；M0-M5 外部门禁 |
 
 ## 里程碑状态
 
@@ -27,7 +27,7 @@
 | M3 Router 真实响应验证 | 待验证 | PR #16 已合并；`/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
 | M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E | 文件系统故障矩阵、真实断电恢复、有效来源检测和 macOS Keychain |
 | M5 小白用户交互 | 进行中 | PR #18 已合并；四步向导、真实前置状态、成功/失败/回滚 E2E 和响应式断点已接入 | 125%/150% 缩放、键盘、屏幕阅读器和缺失应用人工路径验收 |
-| M6 诊断与生命周期 | 进行中 | Rust 结构化诊断包、双重脱敏、support ID、SHA256 和导出前阻断扫描已接入 | Windows/macOS E2E、定向修复、升级/卸载 E2E |
+| M6 诊断与生命周期 | 进行中 | PR #21 已合并结构化诊断包；Rust 定向修复方案、执行前复核和前后状态收据已接入当前分支 | Windows 双目标修复 E2E、助手/快捷方式修复、升级/卸载 E2E |
 | M7 签名与企业交付 | 未开始 | CI 可构建三平台，Release 有 SHA256，尚未签名 | Windows 签名、macOS 公证、企业网络与发布门禁 |
 
 状态只允许使用：`未开始`、`进行中`、`受阻`、`待验证`、`已验证`。
@@ -54,7 +54,8 @@
 | WP-503 服务配置 | 待验证 | Router/Key/模型使用真实发现和规范化结果；原有 E2E 选择器保持稳定 | 企业代理/CA 与 macOS 实机 |
 | WP-504 错误和恢复 | 待验证 | 失败唯一主动作、日志自动展开、常驻复制诊断；Responses 失败和 verify 回滚 E2E | 其它错误码推荐动作和恢复失败注入 |
 | WP-505 平台体验 | 进行中 | 系统字体、浅色模式、原生标题栏、焦点返回和 720/560px 响应式断点 | 820x640、940x720、125%/150%、键盘和屏幕阅读器 |
-| WP-601 脱敏诊断包 | 进行中 | `docs/m6-diagnostic-bundle.zh-CN.md`；Rust 有界日志、固定四文件 ZIP、逐项 SHA256、二次扫描和一键导出；本机测试通过 | Windows ARM64 WebView2 E2E、x64 目标和 macOS 正式候选 |
+| WP-601 脱敏诊断包 | 待验证 | PR #21；`docs/m6-diagnostic-bundle.zh-CN.md`；Rust 固定四文件 ZIP、逐项 SHA256、二次扫描；Windows ARM64 原生与 x64 兼容层 UI E2E | 真实 x64 和 macOS 正式候选 |
+| WP-602 定向修复 | 待验证 | PR [#22](https://github.com/theivanxu/codex-assistant/pull/22)；`docs/m6-targeted-repairs.zh-CN.md`；四类低风险动作；Windows ARM64 故障/恢复 UI E2E、双目标测试/NSIS、x64 兼容层完整 E2E | 真实 x64、macOS、官方包重注册、助手文件与快捷方式修复 |
 
 ## 证据规则
 
@@ -73,6 +74,27 @@
 
 ### 2026-07-28
 
+- PR #21 全量 CI 通过并 squash 合并为 `main@0515b8b`；远端
+  `feat/m6-diagnostic-bundle` 已删除，从该主线创建 `feat/m6-targeted-repairs`。
+- `WP-602` 第一工作包新增 Rust `RepairPlanV1/RepairResultV1`。诊断页根据稳定错误码
+  和 `SystemStatusV1` 只展示一个当前动作，不再常驻固定的配置恢复按钮。
+- 首批动作覆盖官方应用只读复检、Router `/models` 与 `/responses` 重验、事务化配置
+  恢复和失效主题会话清理；执行前重新生成方案，状态变化返回稳定 stale/not-available
+  错误，不执行旧动作。
+- `ROLLBACK_FAILED` 明确禁止自动修改；官方应用异常本轮不执行静默重注册、覆盖安装或
+  卸载，助手文件和快捷方式修复保留为安装器级门禁。
+- macOS 宿主格式、严格 Clippy、前端语法和 Rust 全量测试通过；Rust 为 62 通过、
+  0 失败、1 个本地 Ollama live test 忽略。Windows ARM64/x64 目标测试结果相同，
+  两个 NSIS 均构建成功。
+- Windows ARM64 受控 Responses 404 使状态降为 `models_verified`，配置 SHA256
+  不变；诊断页只显示 `revalidate_router`。Router 恢复后从页面执行修复，收据为
+  `models_verified -> responses_verified`、`changed=true`，配置仍不变，旧错误码
+  不再重复生成动作。
+- ARM64 原生和 x64 兼容层均通过静默安装不自启、首次响应、单实例和完整 UI E2E；
+  最终 VM 恢复 ARM64 原生候选。ARM64 候选 5,609,117 字节，SHA256
+  `16bc39ee86f2122dc7f1acf58bd39e674cd73cf9a1cbcbd1b552044c8bad6bc4`；x64
+  候选 5,984,362 字节，SHA256
+  `dee005ed4a1f9d042d1248826a2d7db60ef98ca05e9f730c6d69fb52527e9912`。
 - 将本地 `main` 快进至远端 `571db73`，纳入 ChatGPT 安装、恢复出厂和 DreamSkin
   主题库三个最新功能提交。
 - 从 `main@571db73` 创建 `feat/m1-core-contracts`。

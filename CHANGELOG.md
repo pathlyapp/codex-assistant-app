@@ -5,6 +5,7 @@ All notable changes to Codex Assistant are documented in this file.
 ## [Unreleased]
 
 - Added a Rust-generated support diagnostic bundle with bounded redacted logs, safe system and transaction summaries, per-file checksums, support IDs, and an export-blocking secret scan.
+- Added Rust-owned targeted repair plans with pre-execution state revalidation, before/after receipts, Router revalidation, transactional configuration recovery, safe official-app rechecks, and stale appearance-session cleanup.
 
 ## [0.8.8] - 2026-07-28
 

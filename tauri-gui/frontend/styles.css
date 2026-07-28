@@ -1802,6 +1802,81 @@ select:disabled {
   background: var(--surface);
 }
 
+.repair-panel {
+  display: flex;
+  min-height: 116px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.repair-panel.action-available {
+  border-color: #b8d6c7;
+  background: #fbfefc;
+}
+
+.repair-panel.manual-required {
+  border-color: #e6d2aa;
+  background: #fffdf8;
+}
+
+.repair-panel-copy {
+  min-width: 0;
+}
+
+.repair-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+}
+
+.repair-panel-heading code {
+  color: var(--text-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+
+.repair-panel h3,
+.repair-panel p {
+  margin: 0;
+}
+
+.repair-panel h3 {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.repair-panel p {
+  max-width: 660px;
+  margin-top: 5px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.repair-panel > button {
+  flex: 0 0 auto;
+}
+
+.repair-result {
+  margin-top: 10px;
+  color: var(--success);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.repair-result.error {
+  color: var(--danger);
+}
+
 .diagnostic-list > div {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr);
@@ -1840,6 +1915,18 @@ select:disabled {
   min-height: 60px;
   align-items: center;
   gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .repair-panel {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .repair-panel > button {
+    align-self: flex-start;
+  }
 }
 
 .danger-zone {

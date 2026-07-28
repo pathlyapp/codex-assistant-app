@@ -248,6 +248,22 @@ python3 tauri-gui/tools/parallels-ollama-proxy.py uninstall
 
 再次修改配置后，首页应出现“恢复上次配置”。点击后必须先快照当前状态，完整恢复上次的 `config.toml`、运行状态、模型目录和可选 DPAPI Key，并在用户确认后重启 ChatGPT。
 
+### M6 定向修复
+
+1. 使用 `responses-404` 受控 Router 执行 `-ExpectSetupFailure`。
+2. 断言 `config.toml` SHA256 不变、Responses 证据撤销、状态为
+   `models_verified`。
+3. 诊断页必须只显示 `revalidate_router`，不得出现固定的诊断恢复按钮。
+4. 将同一 Router 切回 `normal`，执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows-repair-e2e.ps1 `
+  -RouterUrl http://10.211.55.2:11435/v1
+```
+
+5. 收据必须为 `models_verified -> responses_verified`、`changed=true`，
+   `config.toml` SHA256 不变；修复后方案必须为 `not_needed`。
+
 失败场景：关闭 Ollama 后重新配置，`validate_router` 必须失败，不能显示成功页。
 
 ## 5. 文件与 Key

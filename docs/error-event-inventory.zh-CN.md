@@ -39,6 +39,10 @@
 | `APPEARANCE_STORAGE_FAILED` | 本地主题目录无法写入 | `appearance_*` | true | `repair_permissions` |
 | `APPEARANCE_STATE_FAILED` | 外观状态或内置主题读取失败 | `appearance_status/presets` | true | `retry_appearance` |
 | `APPEARANCE_APPLY_FAILED` | ChatGPT 主题启动或注入失败 | `appearance_apply` | true | `retry_appearance` |
+| `REPAIR_NOT_AVAILABLE` | 当前状态已经没有请求的自动修复动作 | `repair_execute` | true | `refresh_repair_plan` |
+| `REPAIR_PLAN_STALE` | 执行前复核发现方案已随状态变化 | `repair_execute` | true | `refresh_repair_plan` |
+| `REPAIR_PLAN_FAILED` | 无法读取足够状态生成修复方案 | `repair_plan` | true | `retry_repair_plan` |
+| `REPAIR_EXECUTION_FAILED` | 修复失败且没有更具体的领域错误码 | `repair_execute` | true | `retry_repair` |
 | `INTERNAL_TASK_FAILED` | 后台任务 join/panic 或未知失败 | 当前 command | true | `retry` |
 
 主题、图库和外观错误使用独立 `appearance_*` stage，不改变核心
@@ -71,6 +75,8 @@
 核心命令已返回 `ErrorEnvelopeV1`：
 
 - `get_system_status`
+- `get_repair_plan`
+- `run_repair`
 - `discover_models`
 - `start_setup`
 - `install_chatgpt_app`
