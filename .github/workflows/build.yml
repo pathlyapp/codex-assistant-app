@@ -108,7 +108,13 @@ jobs:
       - name: Generate manifest and checksums
         run: |
           version=$(node -p "require('./tauri-gui/package.json').version")
-          node tauri-gui/tools/generate-release-manifest.mjs --version "$version" --input release-assets
+          node tauri-gui/tools/generate-release-manifest.mjs \
+            --version "$version" \
+            --input release-assets \
+            --channel internal-test
+          node tauri-gui/tools/generate-release-notes.mjs \
+            --manifest release-assets/package-manifest.json \
+            --output release-assets/RELEASE-NOTES.md
       - uses: actions/upload-artifact@v6
         with:
           name: codex-assistant-release-bundle

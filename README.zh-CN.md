@@ -133,7 +133,7 @@ Windows x64 与 ARM64 必须分别构建。下载页或更新服务根据设备�
 - `tauri-gui/src-tauri/Cargo.toml`
 - `tauri-gui/src-tauri/tauri.conf.json`
 
-推送 `v*` 标签会触发发布工作流。工作流分别构建 Windows x64、Windows ARM64 和 macOS ARM64，自动生成 `package-manifest.json`、`SHA256SUMS.txt`，并将安装包上传为 GitHub Pre-release。源码仓库不手工维护发布清单和二进制文件。
+推送 `v*` 标签会触发发布工作流。工作流分别构建 Windows x64、Windows ARM64 和 macOS ARM64，自动生成 schema v2 `package-manifest.json`、`SHA256SUMS.txt` 和固定格式发布说明，并将安装包上传为仅供内部测试的 GitHub Pre-release。当前清单固定 `customerReady=false`；在代码签名、公证和签名清单验证完成前，客户渠道会被硬阻断。源码仓库不手工维护发布清单和二进制文件。
 
 ```bash
 git tag v0.8.4

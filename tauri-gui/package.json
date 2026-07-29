@@ -8,7 +8,8 @@
     "build": "tauri build",
     "build:mac": "tauri build --bundles app",
     "build:windows": "tauri build --bundles nsis",
-    "build:all": "tauri build"
+    "build:all": "tauri build",
+    "test:release-policy": "node --test tools/release-policy.test.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

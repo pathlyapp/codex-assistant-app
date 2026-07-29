@@ -89,6 +89,7 @@
 - `launch_chatgpt`
 - `restart_chatgpt`
 - `restore_codex_config`
+- `disconnect_router`
 - `get_lifecycle_status`
 - `run_lifecycle_action`
 - `complete_assistant_uninstall_handoff`

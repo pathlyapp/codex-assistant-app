@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@43e41ca` |
+| 开发基线 | `main@17a9e53` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m6-uninstall-boundaries` |
-| 当前 PR | [#23](https://github.com/theivanxu/codex-assistant/pull/23) |
-| 当前应用版本 | `0.8.8` |
-| 下一内部候选 | `0.9.0-alpha.1` |
-| 当前主里程碑 | M6 卸载与数据边界；M0-M5 外部门禁 |
+| 当前分支 | `feat/m7-release-policy-gates` |
+| 当前 PR | [#24](https://github.com/theivanxu/codex-assistant/pull/24) |
+| 当前应用版本 | `0.9.0` |
+| 下一内部候选 | `v0.9.0`（仅内部测试） |
+| 当前主里程碑 | M7 发布分级门禁；M0-M6 外部门禁 |
 
 ## 里程碑状态
 
@@ -25,10 +25,10 @@
 | M1 状态、错误和工作流契约 | 待验证 | PR #15 已合并；全部 Tauri command 使用 V1 envelope，状态、阶段事件、跨平台错误 fixture 和脱敏已接入 | Windows UI 错误交互复核，补齐取消与跨重启恢复边界 |
 | M2 官方应用安装可靠性 | 进行中 | PR #19 已合并可信包检测；`OfficialAppInstaller` 协议和当前 winget Store adapter 已建立 | Windows 双目标复核、Web/MSIX、下载签名、取消/fallback、损坏修复、macOS 严格签名 |
 | M3 Router 真实响应验证 | 待验证 | PR #16 已合并；`/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
-| M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E | 文件系统故障矩阵、真实断电恢复、有效来源检测和 macOS Keychain |
+| M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E；0.9.0 Router 断开使用同一事务并可恢复 | 文件系统故障矩阵、真实断电恢复、有效来源、macOS Keychain 和断开操作实机 E2E |
 | M5 小白用户交互 | 进行中 | PR #18 已合并；四步向导、真实前置状态、成功/失败/回滚 E2E 和响应式断点已接入 | 125%/150% 缩放、键盘、屏幕阅读器和缺失应用人工路径验收 |
-| M6 诊断与生命周期 | 进行中 | PR #21 诊断包和 PR #22 定向修复已合并；WP-603 已通过 Windows ARM64 原生与 x64 兼容层生命周期 E2E | macOS/真实 x64、助手与快捷方式修复、自更新 |
-| M7 签名与企业交付 | 未开始 | CI 可构建三平台，Release 有 SHA256，尚未签名 | Windows 签名、macOS 公证、企业网络与发布门禁 |
+| M6 诊断与生命周期 | 进行中 | PR #21 诊断包、PR #22 定向修复和 PR #23 生命周期边界已合并 | macOS/真实 x64、助手与快捷方式修复、自更新 |
+| M7 签名与企业交付 | 进行中 | WP-700 发布分级已接入：未签名包只允许内部测试，客户渠道硬阻断，发布说明固定披露限制 | Windows 签名、macOS 公证、签名清单、客户下载与企业网络 |
 
 状态只允许使用：`未开始`、`进行中`、`受阻`、`待验证`、`已验证`。
 
@@ -48,7 +48,7 @@
 | WP-302 模型发现 | 已验证 | 限制响应大小和模型数量；去重、空 ID、提交二次核对及 Windows ARM64 UI E2E | 保持跨平台回归 |
 | WP-303 Responses Probe | 待验证 | 固定 `Return OK.`、16 token、SSE/JSON、完成事件、模型一致性、正文不留存；Windows ARM64 正常/404/断流 E2E | 真实 Ollama/LM Studio 兼容服务 |
 | WP-304 Router 错误 UX | 待验证 | 404 和流中断停在稳定步骤 ID；配置不变、旧证据撤销、状态退回 `models_verified` | 真实服务、代理和私有 CA 错误动作验收 |
-| WP-402 配置事务 v2 | 待验证 | PR #17；事务 manifest/SHA256、同目录原子替换、启动恢复、自动回滚、可逆恢复；Windows ARM64 正常/故障/重试/恢复 E2E | 权限/磁盘满/替换失败、真实进程中断、macOS 平台 E2E |
+| WP-402 配置事务 v2 | 待验证 | PR #17；事务 manifest/SHA256、同目录原子替换、启动恢复、自动回滚、可逆恢复；Windows ARM64 正常/故障/重试/恢复 E2E；0.9.0 Router 断开保留非托管 TOML 和已存 Router 数据且可恢复单测 | 权限/磁盘满/替换失败、真实进程中断、macOS 平台和断开操作实机 E2E |
 | WP-501 状态首页 | 待验证 | 首页只显示整体主动作、三项真实状态和当前服务；消费 `SystemStatusV1/recommendedAction` | 小尺寸、缩放和长错误文案实机复核 |
 | WP-502 四步向导 | 待验证 | `docs/m5-guided-setup.zh-CN.md`；Windows 正常、Responses 404、verify 回滚和直接重试 E2E | 实机缩放、键盘和读屏 |
 | WP-503 服务配置 | 待验证 | Router/Key/模型使用真实发现和规范化结果；原有 E2E 选择器保持稳定 | 企业代理/CA 与 macOS 实机 |
@@ -57,6 +57,7 @@
 | WP-601 脱敏诊断包 | 待验证 | PR #21；`docs/m6-diagnostic-bundle.zh-CN.md`；Rust 固定四文件 ZIP、逐项 SHA256、二次扫描；Windows ARM64 原生与 x64 兼容层 UI E2E | 真实 x64 和 macOS 正式候选 |
 | WP-602 定向修复 | 待验证 | PR [#22](https://github.com/theivanxu/codex-assistant/pull/22)；`docs/m6-targeted-repairs.zh-CN.md`；四类低风险动作；Windows ARM64 故障/恢复 UI E2E、双目标测试/NSIS、x64 兼容层完整 E2E | 真实 x64、macOS、官方包重注册、助手文件与快捷方式修复 |
 | WP-603 卸载边界 | 待验证 | PR [#23](https://github.com/theivanxu/codex-assistant/pull/23)；`docs/m6-lifecycle-boundaries.zh-CN.md`；Windows 双目标 67/0/1；ARM64 原生与 x64 兼容层真实页面、交互 handoff、NSIS 默认保留和同包重装 E2E | 签名 macOS 候选、真实 x64、卸载异常矩阵 |
+| WP-700 发布分级门禁 | 进行中 | PR [#24](https://github.com/theivanxu/codex-assistant/pull/24)；`docs/m7-release-policy-gates.zh-CN.md`；schema v2 内部清单；客户渠道阻断；规范三平台附件集合；固定发布说明；6/6 Node 测试；actionlint | CI 实跑、签名供应商、签名清单、客户下载服务 |
 
 ## 证据规则
 
@@ -73,10 +74,24 @@
 
 ## 推进日志
 
+### 2026-07-29
+
+- PR [#24](https://github.com/theivanxu/codex-assistant/pull/24) 已创建并关联 M7
+  milestone，当前等待 GitHub Windows CI 完成完整 Rust 测试门禁。
+- 远端主线已推进到 `main@17a9e53` 并将应用版本更新为 `0.9.0`，包含 Router
+  断开恢复和顶部操作调整；最新主线已合入当前分支，M7 门禁不覆盖这些并行改动。
+
 ### 2026-07-28
 
-- PR [#23](https://github.com/theivanxu/codex-assistant/pull/23) 已创建并关联 M6，
-  当前等待三平台 CI。
+- PR [#23](https://github.com/theivanxu/codex-assistant/pull/23) 全量 CI 通过并 squash
+  合并为 `main@5ad02fc`，远端特性分支已删除；从该主线创建
+  `feat/m7-release-policy-gates`，开始 M7 `WP-700`。
+- 发布清单升级为 schema v2，必须显式传入渠道。当前仅允许 `internal-test`，
+  `customerReady=false`；缺少渠道或请求 `customer` 均硬失败。
+- 新增固定内部测试发布说明，列出产物 SHA256、签名/公证/更新限制、覆盖安装和恢复
+  边界。Release 继续为 prerelease 且显式 `latest=false`。
+- 发布策略 Node 测试 6 通过、0 失败；三个 workflow 通过 `actionlint`。代码签名、
+  公证和签名清单仍是外部门禁，本工作包不宣称已完成。
 - PR [#22](https://github.com/theivanxu/codex-assistant/pull/22) 全量 CI 通过并 squash
   合并为 `main@43e41ca`，远端 `feat/m6-targeted-repairs` 已删除；从该主线创建
   `feat/m6-uninstall-boundaries`，开始 M6 `WP-603`。
