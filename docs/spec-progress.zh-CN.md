@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@17a9e53` |
+| 开发基线 | `main@501f071` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `feat/m7-release-policy-gates` |
-| 当前 PR | [#24](https://github.com/theivanxu/codex-assistant/pull/24) |
+| 当前分支 | `main`（PR #25 合并后） |
+| 当前 PR | [#25](https://github.com/theivanxu/codex-assistant/pull/25)（台账收口） |
 | 当前应用版本 | `0.9.0` |
 | 下一内部候选 | `v0.9.0`（仅内部测试） |
-| 当前主里程碑 | M7 发布分级门禁；M0-M6 外部门禁 |
+| 当前主里程碑 | M7 `WP-700` 已验证；签名、分发与自更新外部门禁 |
 
 ## 里程碑状态
 
@@ -28,7 +28,7 @@
 | M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E；0.9.0 Router 断开使用同一事务并可恢复 | 文件系统故障矩阵、真实断电恢复、有效来源、macOS Keychain 和断开操作实机 E2E |
 | M5 小白用户交互 | 进行中 | PR #18 已合并；四步向导、真实前置状态、成功/失败/回滚 E2E 和响应式断点已接入 | 125%/150% 缩放、键盘、屏幕阅读器和缺失应用人工路径验收 |
 | M6 诊断与生命周期 | 进行中 | PR #21 诊断包、PR #22 定向修复和 PR #23 生命周期边界已合并 | macOS/真实 x64、助手与快捷方式修复、自更新 |
-| M7 签名与企业交付 | 进行中 | WP-700 发布分级已接入：未签名包只允许内部测试，客户渠道硬阻断，发布说明固定披露限制 | Windows 签名、macOS 公证、签名清单、客户下载与企业网络 |
+| M7 签名与企业交付 | 进行中 | PR #24 已合并；WP-700 发布分级已验证：未签名包只允许内部测试，客户渠道硬阻断，发布说明固定披露限制 | Windows 签名、macOS 公证、签名清单、客户下载、自更新与企业网络 |
 
 状态只允许使用：`未开始`、`进行中`、`受阻`、`待验证`、`已验证`。
 
@@ -57,7 +57,7 @@
 | WP-601 脱敏诊断包 | 待验证 | PR #21；`docs/m6-diagnostic-bundle.zh-CN.md`；Rust 固定四文件 ZIP、逐项 SHA256、二次扫描；Windows ARM64 原生与 x64 兼容层 UI E2E | 真实 x64 和 macOS 正式候选 |
 | WP-602 定向修复 | 待验证 | PR [#22](https://github.com/theivanxu/codex-assistant/pull/22)；`docs/m6-targeted-repairs.zh-CN.md`；四类低风险动作；Windows ARM64 故障/恢复 UI E2E、双目标测试/NSIS、x64 兼容层完整 E2E | 真实 x64、macOS、官方包重注册、助手文件与快捷方式修复 |
 | WP-603 卸载边界 | 待验证 | PR [#23](https://github.com/theivanxu/codex-assistant/pull/23)；`docs/m6-lifecycle-boundaries.zh-CN.md`；Windows 双目标 67/0/1；ARM64 原生与 x64 兼容层真实页面、交互 handoff、NSIS 默认保留和同包重装 E2E | 签名 macOS 候选、真实 x64、卸载异常矩阵 |
-| WP-700 发布分级门禁 | 进行中 | PR [#24](https://github.com/theivanxu/codex-assistant/pull/24)；`docs/m7-release-policy-gates.zh-CN.md`；schema v2 内部清单；客户渠道阻断；规范三平台附件集合；固定发布说明；6/6 Node 测试；actionlint | CI 实跑、签名供应商、签名清单、客户下载服务 |
+| WP-700 发布分级门禁 | 已验证 | PR [#24](https://github.com/theivanxu/codex-assistant/pull/24) 合并为 `main@501f071`；CI run `30416453400` 通过；schema v2 内部清单、客户渠道阻断、规范三平台附件集合、固定发布说明和 6/6 Node 测试 | 转入 WP-701 代码签名、WP-702 客户分发和 WP-604 签名自更新 |
 
 ## 证据规则
 
@@ -76,8 +76,13 @@
 
 ### 2026-07-29
 
-- PR [#24](https://github.com/theivanxu/codex-assistant/pull/24) 已创建并关联 M7
-  milestone，当前等待 GitHub Windows CI 完成完整 Rust 测试门禁。
+- PR [#25](https://github.com/theivanxu/codex-assistant/pull/25) 只同步 PR #24 的最终
+  CI、合并 SHA、`WP-700` 状态和后续外部门禁，不改变运行时与发布行为。
+- PR [#24](https://github.com/theivanxu/codex-assistant/pull/24) 的 GitHub Windows CI
+  run `30416453400` 全部通过，发布策略、版本一致性、格式、严格 Clippy 和 Rust
+  全量测试均成功；随后 squash 合并为 `main@501f071`，远端特性分支已删除。
+- `WP-700` 标记为已验证。M7 仍保持进行中，代码签名、公证、签名清单、客户下载和
+  失败可回退的助手自更新继续作为不可降级的商业门禁。
 - 远端主线已推进到 `main@17a9e53` 并将应用版本更新为 `0.9.0`，包含 Router
   断开恢复和顶部操作调整；最新主线已合入当前分支，M7 门禁不覆盖这些并行改动。
 
