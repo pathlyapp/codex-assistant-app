@@ -119,6 +119,10 @@ const state = {
   repairPlan: null,
   repairRequestId: 0,
   repairing: false,
+  assistantUpdate: null,
+  assistantUpdateBusy: false,
+  assistantUpdateHealthConfirmed: false,
+  assistantUpdateAutoTimer: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -139,6 +143,7 @@ function init() {
   }
   refreshStatus({ hydrateForm: true });
   refreshAppearanceStatus();
+  refreshAssistantUpdateStatus({ scheduleAutoCheck: true });
 }
 
 function bindUi() {
@@ -175,6 +180,9 @@ function bindUi() {
   $("#exportLogButton").addEventListener("click", exportLog);
   $("#diagnosticCopyButton").addEventListener("click", copyDiagnostics);
   $("#diagnosticExportButton").addEventListener("click", exportDiagnosticBundle);
+  $("#checkAssistantUpdateButton").addEventListener("click", () => checkAssistantUpdate());
+  $("#downloadAssistantUpdateButton").addEventListener("click", downloadAssistantUpdate);
+  $("#installAssistantUpdateButton").addEventListener("click", installAssistantUpdate);
   $("#uninstallAssistantButton").addEventListener("click", () => runLifecycleAction("uninstall_assistant"));
   $("#restoreManagedConfigButton").addEventListener("click", () =>
     runLifecycleAction("restore_pre_assistant_config"),
@@ -207,6 +215,10 @@ async function wireBackendEvents() {
   await tauri.event.listen("installer-stage", (event) => applyStage(event.payload));
   await tauri.event.listen("installer-log", (event) => appendLog(event.payload));
   await tauri.event.listen("installer-finished", (event) => finishRun(event.payload || {}));
+  await tauri.event.listen("assistant-update-status", (event) => {
+    state.assistantUpdate = event.payload || null;
+    renderAssistantUpdateStatus();
+  });
 }
 
 function navigate(view) {
@@ -227,6 +239,7 @@ function navigate(view) {
   if (view === "diagnostics" && state.status) {
     refreshRepairPlan();
     refreshLifecycleStatus();
+    refreshAssistantUpdateStatus();
   }
 }
 
@@ -242,6 +255,7 @@ async function refreshStatus({ hydrateForm = false } = {}) {
     renderSystemStatus(status);
     if (!state.formDirty) hydrateRouterForm(status);
     await refreshRepairPlan();
+    confirmAssistantUpdateHealth();
   } catch (error) {
     setReadiness("attention", "状态检查失败", friendlyError(error), "重新检查");
     $("#overviewAction").disabled = false;
@@ -975,6 +989,7 @@ function setUiRunning(running) {
     if (button.dataset.view !== "setup") button.disabled = running;
   });
   updateTopbarActions();
+  renderAssistantUpdateStatus();
 }
 
 async function installChatGPT({ continueToSetup = false } = {}) {
@@ -1136,6 +1151,218 @@ async function disconnectRouter() {
   } finally {
     button.disabled = false;
   }
+}
+
+async function refreshAssistantUpdateStatus({ scheduleAutoCheck = false } = {}) {
+  if (!tauri?.core || state.assistantUpdateBusy) return;
+  try {
+    state.assistantUpdate = await tauri.core.invoke("get_assistant_update_status");
+    renderAssistantUpdateStatus();
+    if (scheduleAutoCheck) scheduleAssistantUpdateCheck();
+  } catch (error) {
+    renderAssistantUpdateError(error);
+  }
+}
+
+function scheduleAssistantUpdateCheck() {
+  window.clearTimeout(state.assistantUpdateAutoTimer);
+  if (!state.assistantUpdate?.configured) return;
+  if (!["idle", "failed"].includes(state.assistantUpdate.phase)) return;
+  state.assistantUpdateAutoTimer = window.setTimeout(() => {
+    if (!isApplicationBusy()) checkAssistantUpdate({ silent: true });
+  }, 2500);
+}
+
+async function confirmAssistantUpdateHealth() {
+  if (!tauri?.core || state.assistantUpdateHealthConfirmed) return;
+  state.assistantUpdateHealthConfirmed = true;
+  try {
+    state.assistantUpdate = await tauri.core.invoke("confirm_assistant_update_health");
+    renderAssistantUpdateStatus();
+  } catch (error) {
+    renderAssistantUpdateError(error);
+  }
+}
+
+async function checkAssistantUpdate({ silent = false } = {}) {
+  if (!tauri?.core || isApplicationBusy()) return;
+  state.assistantUpdateBusy = true;
+  setAssistantUpdateControlsBusy(true);
+  try {
+    state.assistantUpdate = await tauri.core.invoke("check_for_assistant_update");
+    renderAssistantUpdateStatus();
+    if (!silent) {
+      showToast(
+        state.assistantUpdate.phase === "available"
+          ? `发现 Codex 助手 ${state.assistantUpdate.availableVersion}`
+          : "Codex 助手已是最新版本",
+      );
+    }
+  } catch (error) {
+    renderAssistantUpdateError(error);
+    if (!silent) showToast(friendlyError(error), true);
+  } finally {
+    state.assistantUpdateBusy = false;
+    renderAssistantUpdateStatus();
+  }
+}
+
+async function downloadAssistantUpdate() {
+  if (!tauri?.core || isApplicationBusy()) return;
+  state.assistantUpdateBusy = true;
+  setAssistantUpdateControlsBusy(true);
+  try {
+    state.assistantUpdate = await tauri.core.invoke("download_assistant_update");
+    renderAssistantUpdateStatus();
+    showToast("更新已下载并通过签名验证");
+  } catch (error) {
+    renderAssistantUpdateError(error);
+    showToast(friendlyError(error), true);
+  } finally {
+    state.assistantUpdateBusy = false;
+    renderAssistantUpdateStatus();
+  }
+}
+
+async function installAssistantUpdate() {
+  if (!tauri?.core || isApplicationBusy() || !state.assistantUpdate?.canInstall) return;
+  const nextVersion = state.assistantUpdate.availableVersion || "新版本";
+  const confirmed = await requestConfirmation({
+    title: `安装 Codex 助手 ${nextVersion}？`,
+    message:
+      "安装时助手会自动关闭并重新启动。ChatGPT、Router 配置、Key、主题和诊断数据不会被修改。",
+    confirmLabel: "安装并重启",
+  });
+  if (!confirmed || isApplicationBusy()) return;
+
+  state.assistantUpdateBusy = true;
+  setAssistantUpdateControlsBusy(true);
+  try {
+    state.assistantUpdate = await tauri.core.invoke("install_assistant_update");
+    renderAssistantUpdateStatus();
+  } catch (error) {
+    renderAssistantUpdateError(error);
+    showToast(friendlyError(error), true);
+    state.assistantUpdateBusy = false;
+    renderAssistantUpdateStatus();
+  }
+}
+
+function renderAssistantUpdateStatus() {
+  const status = state.assistantUpdate;
+  if (!status) {
+    const stateBadge = $("#assistantUpdateState");
+    stateBadge.dataset.phase = "";
+    stateBadge.dataset.verification = "";
+    setBadge(stateBadge, "检查中", "pending");
+    $("#assistantUpdateDetail").textContent = "正在读取当前版本和更新能力。";
+    setAssistantUpdateControlsBusy(true);
+    return;
+  }
+
+  $("#versionLabel").textContent = `Codex 助手 ${status.currentVersion}`;
+  const phaseCopy = {
+    not_configured: ["未启用", "neutral", `当前版本 ${status.currentVersion}；此构建没有受信任的更新服务。`],
+    idle: ["未检查", "neutral", `当前版本 ${status.currentVersion}，可检查是否有新版本。`],
+    checking: ["检查中", "pending", "正在连接受信任的更新服务。"],
+    up_to_date: ["已是最新", "success", `当前版本 ${status.currentVersion} 已是此通道的最新版本。`],
+    available: [
+      "有新版本",
+      "warning",
+      `可更新到 ${status.availableVersion || "新版本"}，下载后会验证更新签名。`,
+    ],
+    downloading: ["下载中", "pending", `正在下载 ${status.availableVersion || "助手更新"}。`],
+    ready_to_install: [
+      "已验证",
+      "success",
+      `${status.availableVersion || "助手更新"} 已下载并通过签名验证。`,
+    ],
+    installing: ["安装中", "pending", "正在启动系统安装程序，助手即将关闭。"],
+    restart_required: ["等待重启", "warning", "更新已安装，正在重新启动助手。"],
+    failed: ["未完成", "error", status.blockerMessage || "更新操作未能完成，当前版本保持不变。"],
+  };
+  const [badgeText, badgeTone, detail] =
+    phaseCopy[status.phase] || ["未知", "neutral", "更新状态无法识别。"];
+  const stateBadge = $("#assistantUpdateState");
+  stateBadge.dataset.phase = status.phase || "";
+  stateBadge.dataset.verification = status.verification || "";
+  setBadge(stateBadge, badgeText, badgeTone);
+  $("#assistantUpdateDetail").textContent = detail;
+
+  const progress = $("#assistantUpdateProgress");
+  const showProgress = ["downloading", "ready_to_install"].includes(status.phase);
+  progress.classList.toggle("hidden", !showProgress);
+  if (showProgress) {
+    const percent = Number.isFinite(status.progressPercent) ? status.progressPercent : 0;
+    $("#assistantUpdatePercent").textContent = `${percent}%`;
+    $("#assistantUpdateProgressBar").style.width = `${percent}%`;
+    $("#assistantUpdateProgressText").textContent =
+      status.phase === "ready_to_install"
+        ? `已验证 ${formatBytes(status.downloadedBytes)}`
+        : status.totalBytes
+          ? `${formatBytes(status.downloadedBytes)} / ${formatBytes(status.totalBytes)}`
+          : `已下载 ${formatBytes(status.downloadedBytes)}`;
+  }
+
+  const notes = $("#assistantUpdateNotes");
+  notes.textContent = status.releaseNotes || "";
+  notes.classList.toggle("hidden", !status.releaseNotes);
+
+  const busy = isApplicationBusy();
+  const checkButton = $("#checkAssistantUpdateButton");
+  const downloadButton = $("#downloadAssistantUpdateButton");
+  const installButton = $("#installAssistantUpdateButton");
+  checkButton.classList.toggle("hidden", !status.configured);
+  checkButton.disabled = busy || !status.canCheck;
+  downloadButton.classList.toggle("hidden", !status.canDownload || status.canInstall);
+  downloadButton.disabled = busy || !status.canDownload;
+  installButton.classList.toggle("hidden", !status.canInstall);
+  installButton.disabled = busy || !status.canInstall;
+}
+
+function renderAssistantUpdateError(error) {
+  const envelope = errorEnvelope(error);
+  const status = state.assistantUpdate;
+  if (status) {
+    status.phase = "failed";
+    status.blockerCode = envelope?.code || "UPDATE_STATE_UNAVAILABLE";
+    status.blockerMessage = friendlyError(error);
+    renderAssistantUpdateStatus();
+    return;
+  }
+  const stateBadge = $("#assistantUpdateState");
+  stateBadge.dataset.phase = "failed";
+  stateBadge.dataset.verification = "failed";
+  setBadge(stateBadge, "检查失败", "error");
+  $("#assistantUpdateDetail").textContent = friendlyError(error);
+  setAssistantUpdateControlsBusy(true);
+}
+
+function setAssistantUpdateControlsBusy(busy) {
+  [
+    "#checkAssistantUpdateButton",
+    "#downloadAssistantUpdateButton",
+    "#installAssistantUpdateButton",
+  ].forEach((selector) => {
+    $(selector).disabled = busy;
+  });
+}
+
+function isApplicationBusy() {
+  return Boolean(
+    state.running
+      || state.installingApp
+      || state.lifecycleRunning
+      || state.repairing
+      || state.assistantUpdateBusy,
+  );
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 async function refreshLifecycleStatus() {
@@ -1570,7 +1797,7 @@ async function copyDiagnostics() {
     (stage) => stage.stage === "rollback" && stage.status === "failed",
   ) || (state.lastResultPayload?.stages || []).find((stage) => stage.status === "failed");
   const text = [
-    `Codex Assistant: 0.8.8`,
+    `Codex Assistant: ${state.assistantUpdate?.currentVersion || "0.9.0"}`,
     `Status schema: ${status.schemaVersion || "legacy"}`,
     `Platform: ${status.platform} ${formatArchitecture(status.architecture)}`,
     `Overall: ${status.overall || (status.ready ? "ready" : "action_required")}`,

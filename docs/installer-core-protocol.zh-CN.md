@@ -1,6 +1,6 @@
 # installer-core 协议
 
-0.8.8 开发基线的 installer-core 完全由 Rust 实现，不调用 Go sidecar。前端只消费
+0.9.0 开发基线的 installer-core 完全由 Rust 实现，不调用 Go sidecar。前端只消费
 Tauri command 和结构化事件，不理解 Appx、DPAPI 或 TOML 写入细节。
 
 ## 命令
@@ -110,6 +110,22 @@ Key。恢复前先为当前状态生成 `operation=restore` 的新事务；恢�
 失败则自动恢复操作前状态，因此再次恢复可以撤销本次操作。旧版时间戳快照只作为迁移
 回退读取。前端随后执行用户已确认的 ChatGPT 重启。
 
+### 助手更新命令
+
+`get_assistant_update_status`、`check_for_assistant_update`、
+`download_assistant_update`、`install_assistant_update` 和
+`confirm_assistant_update_health` 返回 `UpdateStatusV1` 或统一
+`ErrorEnvelopeV1`。
+
+更新 endpoint、公钥和 channel 由构建写入信任根，Release 运行时不能由用户或环境
+变量替换。正式 endpoint 必须为 HTTPS；显式 mock feature 也只允许回环 HTTP。
+Tauri 在下载完成返回前执行 Minisign 校验，只有 `verification=verified` 才允许安装。
+安装前写入版本化收据，新版本完成核心状态读取后标记为 `healthy`。
+
+更新只管理助手自身，不改变官方 ChatGPT、Router、Key、Codex 配置或主题。该协议是
+`WP-604A` 客户端阶段；代码签名、客户分发、撤销和安装后强制回退仍是独立门禁。完整
+边界见 `docs/wp-604a-updater-client.zh-CN.md`。
+
 ### 外观命令
 
 `get_appearance_status`、`apply_appearance`、`import_theme_image`、
@@ -150,6 +166,9 @@ setup 的六个主阶段失败后可能追加第七个 `rollback` 阶段。该�
 
 `installer-finished`：包含相同 `operationId`、最终结果、可选 `ErrorEnvelopeV1` 及
 已完成阶段。前端按 `operationId` 忽略过期或重复 event/invoke 返回。
+
+`assistant-update-status`：包含完整 `UpdateStatusV1`。check/download/install 使用
+该事件发布真实阶段和下载字节进度，不复用 setup 阶段编号，也不使用前端假进度。
 
 核心命令失败返回：
 

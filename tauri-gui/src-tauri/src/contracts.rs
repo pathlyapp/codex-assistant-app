@@ -242,10 +242,21 @@ impl ErrorEnvelopeV1 {
         let stage = stage.into();
         let safe_detail = safe_detail.into();
         let code = classify_legacy_error(&stage, &safe_detail);
-        let (title, message, recoverable, suggested_action) = error_copy(code);
+        Self::from_code(stage, code, safe_detail)
+    }
+
+    pub fn from_code(
+        stage: impl Into<String>,
+        code: impl Into<String>,
+        safe_detail: impl Into<String>,
+    ) -> Self {
+        let stage = stage.into();
+        let code = code.into();
+        let safe_detail = safe_detail.into();
+        let (title, message, recoverable, suggested_action) = error_copy(&code);
         Self {
             schema_version: SCHEMA_VERSION_V1,
-            code: code.to_string(),
+            code,
             stage,
             title: title.to_string(),
             message: message.to_string(),
@@ -259,7 +270,9 @@ impl ErrorEnvelopeV1 {
 
 fn classify_legacy_error(stage: &str, detail: &str) -> &'static str {
     let lower = detail.to_lowercase();
-    if lower.contains("diagnostic_secret_detected") || lower.contains("诊断包检测到疑似密钥")
+    if lower.starts_with("operation_busy:") {
+        "OPERATION_BUSY"
+    } else if lower.contains("diagnostic_secret_detected") || lower.contains("诊断包检测到疑似密钥")
     {
         "DIAGNOSTIC_SECRET_DETECTED"
     } else if stage == "repair_execute"
@@ -483,6 +496,72 @@ fn classify_appearance_error(stage: &str, lower: &str) -> &'static str {
 
 fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
     match code {
+        "OPERATION_BUSY" => (
+            "另一项操作正在进行",
+            "请等待当前安装、配置、修复或更新操作完成后再试。",
+            true,
+            "wait_for_operation",
+        ),
+        "UPDATE_NOT_CONFIGURED" => (
+            "当前版本尚未启用更新服务",
+            "此构建没有受信任的更新地址和公钥，不会下载或安装任何内容。",
+            false,
+            "open_diagnostics",
+        ),
+        "UPDATE_BUSY" => (
+            "更新操作正在进行",
+            "请等待当前更新步骤完成，或先完成正在运行的安装和配置任务。",
+            true,
+            "wait_for_update",
+        ),
+        "UPDATE_CHECK_FAILED" => (
+            "无法检查助手更新",
+            "更新服务暂时不可用，请检查网络、代理或稍后重试。",
+            true,
+            "retry_update_check",
+        ),
+        "UPDATE_NOT_AVAILABLE" => (
+            "没有可下载的助手更新",
+            "请先重新检查更新，再下载可用版本。",
+            true,
+            "check_for_update",
+        ),
+        "UPDATE_DOWNLOAD_FAILED" => (
+            "助手更新下载失败",
+            "当前版本未被替换，请检查网络后重新下载。",
+            true,
+            "retry_update_download",
+        ),
+        "UPDATE_SIGNATURE_INVALID" => (
+            "助手更新未通过签名验证",
+            "下载内容的签名无效，助手已阻止安装。请导出诊断并联系支持人员。",
+            false,
+            "export_diagnostics",
+        ),
+        "UPDATE_NOT_DOWNLOADED" => (
+            "助手更新尚未准备好",
+            "请先完成下载和签名验证，再开始安装。",
+            true,
+            "download_update",
+        ),
+        "UPDATE_INSTALL_FAILED" => (
+            "助手更新安装失败",
+            "当前可运行版本未确认被替换，请重新打开助手并检查更新状态。",
+            true,
+            "retry_update_install",
+        ),
+        "UPDATE_RECEIPT_FAILED" => (
+            "无法记录助手更新状态",
+            "为避免无法判断更新结果，助手已停止安装。请检查磁盘空间和文件权限。",
+            true,
+            "open_diagnostics",
+        ),
+        "UPDATE_STATE_UNAVAILABLE" => (
+            "助手更新状态不可用",
+            "请重新启动助手后再检查更新。",
+            true,
+            "restart_assistant",
+        ),
         "APP_NOT_INSTALLED" => (
             "尚未安装 ChatGPT",
             "请先通过助手或 OpenAI 官方渠道安装 ChatGPT。",
@@ -1112,6 +1191,30 @@ mod tests {
             "助手管理的 Codex 配置仍在使用本地数据，请先恢复原配置",
         );
         assert_eq!(lifecycle_dependency.code, "LIFECYCLE_DATA_IN_USE");
+    }
+
+    #[test]
+    fn update_errors_keep_stable_actions_and_redaction() {
+        let signature = ErrorEnvelopeV1::from_code(
+            "update_download",
+            "UPDATE_SIGNATURE_INVALID",
+            "signature failed for C:\\Users\\alice\\Downloads\\update.exe?token=secret",
+        );
+        assert_eq!(signature.schema_version, SCHEMA_VERSION_V1);
+        assert_eq!(signature.suggested_action, "export_diagnostics");
+        assert!(!signature.recoverable);
+        let technical = signature.technical["detail"]
+            .as_str()
+            .expect("technical detail should be a string");
+        assert!(!technical.contains("alice"));
+        assert!(!technical.contains("secret"));
+
+        let busy = ErrorEnvelopeV1::from_legacy(
+            "configure_codex",
+            "OPERATION_BUSY: assistant_update_install",
+        );
+        assert_eq!(busy.code, "OPERATION_BUSY");
+        assert_eq!(busy.suggested_action, "wait_for_operation");
     }
 
     #[test]

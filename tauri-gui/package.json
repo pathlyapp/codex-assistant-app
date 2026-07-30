@@ -8,8 +8,15 @@
     "build": "tauri build",
     "build:mac": "tauri build --bundles app",
     "build:windows": "tauri build --bundles nsis",
+    "build:update:mac": "node tools/build-updater.mjs --platform mac",
+    "build:update:windows": "node tools/build-updater.mjs --platform windows",
+    "build:update:mock:mac": "node tools/build-updater.mjs --platform mac --mock",
+    "build:update:mock:windows": "node tools/build-updater.mjs --platform windows --mock",
     "build:all": "tauri build",
-    "test:release-policy": "node --test tools/release-policy.test.mjs"
+    "test:release-policy": "node --test tools/release-policy.test.mjs",
+    "test:updater": "npm run test:updater-build && npm run test:updater-mock",
+    "test:updater-build": "node --test tools/build-updater.test.mjs",
+    "test:updater-mock": "node --test tools/updater-test-server.test.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

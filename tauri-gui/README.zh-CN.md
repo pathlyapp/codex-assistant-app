@@ -39,7 +39,7 @@ python3 tools/parallels-ollama-proxy.py status
 ## 开发
 
 ```bash
-cd /Users/theivanxu/workspaces/deeppath/codex-gateway-poc-installer/tauri-gui
+cd tauri-gui
 npm install
 npm run dev
 ```
@@ -54,6 +54,12 @@ npm run build:mac
 ```
 
 Windows 分发包必须在 Windows VM 或 Windows CI 中执行 `npm run build:windows`，并按 `../docs/windows-vm-test-plan.zh-CN.md` 做端到端验证。
+
+助手更新签名构建使用 `npm run build:update:mac` 或
+`npm run build:update:windows`；本地回环 PoC 使用对应的 `build:update:mock:*`。
+环境变量、签名密钥和模拟服务步骤见
+`../docs/wp-604a-updater-client.zh-CN.md`。未配置更新信任根的普通构建不会检查或
+下载更新。
 
 ## 状态文件
 

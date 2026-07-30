@@ -28,9 +28,11 @@ mod diagnostics;
 mod lifecycle;
 mod official_app;
 mod official_installer;
+mod operation_gate;
 mod repair;
 mod router_client;
 mod token_support;
+mod updater;
 
 use config_transaction::{ConfigTransaction, ManagedFile};
 use contracts::{
@@ -52,7 +54,7 @@ use repair::{
 };
 use router_client::{ResponsesProbeResult, RouterClient};
 
-const VERSION: &str = "0.8.8";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const CONFIG_START: &str = "# >>> CodexAssistant Managed Config";
 const CONFIG_END: &str = "# <<< CodexAssistant Managed Config";
 const LEGACY_CONFIG_START: &str = "# >>> CompanyCodex Gateway PoC";
@@ -533,6 +535,8 @@ async fn run_repair(
     app: AppHandle,
     request: RepairRunRequest,
 ) -> Result<RepairResultV1, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("repair_execute")
+        .map_err(|error| command_error("repair_execute", error))?;
     tauri::async_runtime::spawn_blocking(move || run_repair_inner(&app, &request))
         .await
         .map_err(|error| command_error("repair_execute", format!("执行修复任务失败: {error}")))?
@@ -557,6 +561,8 @@ async fn start_setup(
     app: AppHandle,
     options: SetupOptions,
 ) -> Result<InstallerFinished, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("configure_codex")
+        .map_err(|error| command_error("setup", error))?;
     let options = resolve_options(options).map_err(|error| command_error("preflight", error))?;
     tauri::async_runtime::spawn_blocking(move || run_setup(app, options))
         .await
@@ -565,6 +571,8 @@ async fn start_setup(
 
 #[tauri::command]
 async fn install_chatgpt_app(app: AppHandle) -> Result<SystemStatusV1, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("install_chatgpt")
+        .map_err(|error| command_error("install_chatgpt", error))?;
     tauri::async_runtime::spawn_blocking(move || install_chatgpt_app_inner(&app))
         .await
         .map_err(|error| command_error("install_chatgpt", format!("安装任务失败: {error}")))?
@@ -581,6 +589,8 @@ async fn launch_chatgpt() -> Result<(), ErrorEnvelopeV1> {
 
 #[tauri::command]
 async fn restart_chatgpt() -> Result<(), ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("restart_chatgpt")
+        .map_err(|error| command_error("launch_chatgpt", error))?;
     tauri::async_runtime::spawn_blocking(restart_chatgpt_inner)
         .await
         .map_err(|error| command_error("restart_chatgpt", format!("重启任务失败: {error}")))?
@@ -589,6 +599,8 @@ async fn restart_chatgpt() -> Result<(), ErrorEnvelopeV1> {
 
 #[tauri::command]
 async fn restore_codex_config() -> Result<RestoreResult, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("restore_codex_config")
+        .map_err(|error| command_error("rollback", error))?;
     tauri::async_runtime::spawn_blocking(restore_codex_config_inner)
         .await
         .map_err(|error| command_error("rollback", format!("恢复任务失败: {error}")))?
@@ -597,6 +609,8 @@ async fn restore_codex_config() -> Result<RestoreResult, ErrorEnvelopeV1> {
 
 #[tauri::command]
 async fn disconnect_router() -> Result<DisconnectResult, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("disconnect_router")
+        .map_err(|error| command_error("disconnect_router", error))?;
     tauri::async_runtime::spawn_blocking(disconnect_router_inner)
         .await
         .map_err(|error| command_error("disconnect_router", format!("断开任务失败: {error}")))?
@@ -621,6 +635,8 @@ async fn run_lifecycle_action(
     app: AppHandle,
     request: LifecycleActionRequest,
 ) -> Result<LifecycleActionResultV1, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("lifecycle_action")
+        .map_err(|error| command_error("lifecycle_action", error))?;
     tauri::async_runtime::spawn_blocking(move || run_lifecycle_action_inner(&app, &request))
         .await
         .map_err(|error| command_error("lifecycle_action", format!("应用与数据操作失败: {error}")))?
@@ -629,6 +645,8 @@ async fn run_lifecycle_action(
 
 #[tauri::command]
 async fn complete_assistant_uninstall_handoff(app: AppHandle) -> Result<(), ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("assistant_uninstall")
+        .map_err(|error| command_error("lifecycle_action", error))?;
     complete_assistant_uninstall_handoff_inner(app)
         .map_err(|error| command_error("lifecycle_action", error))
 }
@@ -648,6 +666,8 @@ async fn get_appearance_status() -> Result<AppearanceStatus, ErrorEnvelopeV1> {
 
 #[tauri::command]
 async fn apply_appearance(theme: String) -> Result<AppearanceStatus, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("appearance_apply")
+        .map_err(|error| command_error("appearance_apply", error))?;
     tauri::async_runtime::spawn_blocking(move || apply_appearance_inner(&theme))
         .await
         .map_err(|error| command_error("appearance_apply", format!("应用外观任务失败: {error}")))?
@@ -658,6 +678,8 @@ async fn apply_appearance(theme: String) -> Result<AppearanceStatus, ErrorEnvelo
 async fn import_theme_image(
     request: ThemeImageRequest,
 ) -> Result<AppearanceStatus, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("appearance_import")
+        .map_err(|error| command_error("appearance_import", error))?;
     tauri::async_runtime::spawn_blocking(move || import_theme_image_inner(&request))
         .await
         .map_err(|error| {
@@ -4024,6 +4046,16 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .setup(|app| {
+            let updater_state = updater::AssistantUpdaterState::new(app.handle());
+            let updater_configured = updater_state.is_configured();
+            app.manage(updater_state);
+            if updater_configured {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_system_status,
             export_diagnostics,
@@ -4043,7 +4075,12 @@ pub fn run() {
             apply_appearance,
             import_theme_image,
             list_preset_themes,
-            list_gallery_themes
+            list_gallery_themes,
+            updater::get_assistant_update_status,
+            updater::check_for_assistant_update,
+            updater::download_assistant_update,
+            updater::install_assistant_update,
+            updater::confirm_assistant_update_health
         ])
         .run(tauri::generate_context!())
         .expect("error while running Codex Assistant app");

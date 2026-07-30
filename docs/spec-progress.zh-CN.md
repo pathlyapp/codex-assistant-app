@@ -9,13 +9,13 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 开始日期 | 2026-07-28 |
-| 开发基线 | `main@501f071` |
+| 开发基线 | `main@4df20f9` |
 | 发布基线 | `v0.8.4@2588247` |
-| 当前分支 | `main`（PR #25 合并后） |
-| 当前 PR | [#25](https://github.com/theivanxu/codex-assistant/pull/25)（台账收口） |
+| 当前分支 | `feat/wp-604a-updater-client` |
+| 当前 PR | [#26](https://github.com/theivanxu/codex-assistant/pull/26)（WP-604A） |
 | 当前应用版本 | `0.9.0` |
 | 下一内部候选 | `v0.9.0`（仅内部测试） |
-| 当前主里程碑 | M7 `WP-700` 已验证；签名、分发与自更新外部门禁 |
+| 当前主里程碑 | M6 `WP-604A` 客户端阶段已验证；M7 签名与客户分发仍是外部门禁 |
 
 ## 里程碑状态
 
@@ -27,8 +27,8 @@
 | M3 Router 真实响应验证 | 待验证 | PR #16 已合并；`/models` 与 `/responses` 共用 Rust 客户端；Windows ARM64 正常、404、流中断和故障恢复 UI E2E 已通过 | 真实 Ollama/LM Studio、企业代理和私有 CA 兼容验证 |
 | M4 配置事务与跨平台密钥 | 进行中 | PR #17 已合并；事务清单、原子写入、验证失败自动回滚、中断恢复和可逆手动恢复已通过 Windows ARM64 E2E；0.9.0 Router 断开使用同一事务并可恢复 | 文件系统故障矩阵、真实断电恢复、有效来源、macOS Keychain 和断开操作实机 E2E |
 | M5 小白用户交互 | 进行中 | PR #18 已合并；四步向导、真实前置状态、成功/失败/回滚 E2E 和响应式断点已接入 | 125%/150% 缩放、键盘、屏幕阅读器和缺失应用人工路径验收 |
-| M6 诊断与生命周期 | 进行中 | PR #21 诊断包、PR #22 定向修复和 PR #23 生命周期边界已合并 | macOS/真实 x64、助手与快捷方式修复、自更新 |
-| M7 签名与企业交付 | 进行中 | PR #24 已合并；WP-700 发布分级已验证：未签名包只允许内部测试，客户渠道硬阻断，发布说明固定披露限制 | Windows 签名、macOS 公证、签名清单、客户下载、自更新与企业网络 |
+| M6 诊断与生命周期 | 进行中 | PR #21 诊断包、PR #22 定向修复、PR #23 生命周期边界已合并；`WP-604A` 更新客户端、签名下载、回环 mock 和 Windows ARM64 两真实版本 E2E 已验证 | 助手与快捷方式修复、真实 x64、客户签名/分发和安装后强制回退 |
+| M7 签名与企业交付 | 进行中 | PR #24 已合并；WP-700 发布分级已验证：未签名包只允许内部测试，客户渠道硬阻断，发布说明固定披露限制 | Windows 签名、macOS 公证、客户下载、撤销、恢复代理与企业网络 |
 
 状态只允许使用：`未开始`、`进行中`、`受阻`、`待验证`、`已验证`。
 
@@ -57,6 +57,7 @@
 | WP-601 脱敏诊断包 | 待验证 | PR #21；`docs/m6-diagnostic-bundle.zh-CN.md`；Rust 固定四文件 ZIP、逐项 SHA256、二次扫描；Windows ARM64 原生与 x64 兼容层 UI E2E | 真实 x64 和 macOS 正式候选 |
 | WP-602 定向修复 | 待验证 | PR [#22](https://github.com/theivanxu/codex-assistant/pull/22)；`docs/m6-targeted-repairs.zh-CN.md`；四类低风险动作；Windows ARM64 故障/恢复 UI E2E、双目标测试/NSIS、x64 兼容层完整 E2E | 真实 x64、macOS、官方包重注册、助手文件与快捷方式修复 |
 | WP-603 卸载边界 | 待验证 | PR [#23](https://github.com/theivanxu/codex-assistant/pull/23)；`docs/m6-lifecycle-boundaries.zh-CN.md`；Windows 双目标 67/0/1；ARM64 原生与 x64 兼容层真实页面、交互 handoff、NSIS 默认保留和同包重装 E2E | 签名 macOS 候选、真实 x64、卸载异常矩阵 |
+| WP-604A 更新客户端 | 已验证 | `docs/wp-604a-updater-client.zh-CN.md`；Rust/Node 门禁、普通构建启动/单实例、macOS updater 签名产物、Windows ARM64 NSIS updater 和 `0.9.0 -> 0.9.1` 页面下载/验签/安装/重启/健康 E2E | 转入真实 x64、`WP-701` 代码签名、`WP-702` 客户分发和 `WP-604B` 强制回退 |
 | WP-700 发布分级门禁 | 已验证 | PR [#24](https://github.com/theivanxu/codex-assistant/pull/24) 合并为 `main@501f071`；CI run `30416453400` 通过；schema v2 内部清单、客户渠道阻断、规范三平台附件集合、固定发布说明和 6/6 Node 测试 | 转入 WP-701 代码签名、WP-702 客户分发和 WP-604 签名自更新 |
 
 ## 证据规则
@@ -73,6 +74,36 @@
 “代码存在”不是“已验证”。没有可重复证据的能力保持为“进行中”或“待验证”。
 
 ## 推进日志
+
+### 2026-07-30
+
+- 从 `main@4df20f9` 创建 `feat/wp-604a-updater-client`，开始 `WP-604A`。该阶段只
+  实现更新客户端和本地验证，不改变 `customerReady=false`。
+- 新增 Rust `UpdateStatusV1`、五个更新 command、`assistant-update-status` 事件、
+  稳定 update 错误码、清单下载地址传输校验、下载签名验证、256 MiB 安装接纳上限和
+  版本化原子收据。
+- 配置、官方应用安装、修复、生命周期、外观和更新安装共用 Rust 修改操作门禁，避免
+  前端按钮状态失效时发生并发修改。
+- 正式 Release 只接受编译期 HTTPS endpoint 和 Minisign 公钥；显式 mock feature
+  只允许回环 HTTP。普通未配置构建明确显示未启用，不读取 Release 运行时覆盖。
+- 新增跨平台 updater 构建包装器和回环模拟服务，覆盖可用更新、无更新、无效签名、
+  服务失败、签名材料缺失和 endpoint 限制。macOS ARM64 已生成真实
+  `.app.tar.gz` 与 `.sig`，动态清单 200 和当前版本 204 已验证。
+- Windows ARM64 普通 NSIS 安装不提前启动、首次响应和双启动单实例通过，SHA256 为
+  `a4ece75c4ee0ad84991d0a65f94f2d09297b4321a38b9c1f1ca1f7569a47cc81`。
+- Windows ARM64 两真实版本 updater E2E 通过：`0.9.0` 基线 SHA256 为
+  `672f98a834eb93bddad8ce116eb26598236109dfbcdec3b6558b38679ddd4a95`，
+  `0.9.1` 更新包 SHA256 为
+  `a76d3c741a51159a7638db92c3df790bde34e1af88d1e6612e2063f9b62995c0`，
+  detached signature SHA256 为
+  `2c74e6d56ed155d5a13260ba270dec1808818eb06e7f3b915d38e2843c216dfb`。
+  页面完成检查、100% 下载、验签、确认安装和重启，注册/产品版本均为 `0.9.1`，
+  进程可响应且收据为 `healthy`。
+- 普通未配置构建启动测试暴露并修复不完整 updater 配置 panic；插件现在只在完整
+  编译期信任根通过校验时注册，普通构建显示 `not_configured`。macOS 普通 `.app`
+  实际启动保持运行，Windows 虚拟机最终恢复并打开普通 `0.9.0`。
+- `WP-604A` 客户端阶段标记为已验证。代码签名、客户分发、撤销、真实 x64 和安装
+  开始后的旧版本强制恢复继续由 `WP-701`、`WP-702`、`WP-604B` 关闭。
 
 ### 2026-07-29
 

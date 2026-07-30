@@ -66,3 +66,4 @@ temp/
 *.dpapi
 **/runtime/
 **/config.local.*
+**/.local-update/

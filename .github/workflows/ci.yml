@@ -36,6 +36,7 @@ jobs:
           workspaces: tauri-gui/src-tauri -> target
       - run: npm ci
       - run: npm run test:release-policy
+      - run: npm run test:updater
       - run: node tools/check-version.mjs
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings

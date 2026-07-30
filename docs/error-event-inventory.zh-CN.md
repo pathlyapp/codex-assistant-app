@@ -49,6 +49,17 @@
 | `ASSISTANT_UNINSTALLER_MISSING` | 完整安装版卸载入口缺失 | `lifecycle_action` | true | `open_system_apps` |
 | `LIFECYCLE_STATUS_FAILED` | 无法读取应用与数据边界状态 | `lifecycle_status` | true | `retry_lifecycle_status` |
 | `LIFECYCLE_ACTION_FAILED` | 生命周期动作失败且无更具体分类 | `lifecycle_action` | true | `retry_lifecycle_action` |
+| `OPERATION_BUSY` | 另一项修改性操作正在执行 | 当前 command | true | `wait_for_operation` |
+| `UPDATE_NOT_CONFIGURED` | 构建未内置可信 endpoint 与公钥 | `update_check` | false | `open_diagnostics` |
+| `UPDATE_BUSY` | 更新步骤或其它修改性操作正在执行 | `update_*` | true | `wait_for_update` |
+| `UPDATE_CHECK_FAILED` | 更新清单网络、格式或服务失败 | `update_check` | true | `retry_update_check` |
+| `UPDATE_NOT_AVAILABLE` | 尚未检查到可下载的新版本 | `update_download/install` | true | `check_for_update` |
+| `UPDATE_DOWNLOAD_FAILED` | 更新包下载、大小或网络失败 | `update_download` | true | `retry_update_download` |
+| `UPDATE_SIGNATURE_INVALID` | Minisign、Base64 或 detached signature 无效 | `update_download` | false | `export_diagnostics` |
+| `UPDATE_NOT_DOWNLOADED` | 尚未得到已验证更新包 | `update_install` | true | `download_update` |
+| `UPDATE_INSTALL_FAILED` | 平台安装器未完成 | `update_install` | true | `retry_update_install` |
+| `UPDATE_RECEIPT_FAILED` | 更新收据无法原子写入 | `update_install/update_health` | true | `open_diagnostics` |
+| `UPDATE_STATE_UNAVAILABLE` | 更新状态锁或收据不可用 | `update_*` | true | `restart_assistant` |
 | `INTERNAL_TASK_FAILED` | 后台任务 join/panic 或未知失败 | 当前 command | true | `retry` |
 
 主题、图库和外观错误使用独立 `appearance_*` stage，不改变核心
@@ -104,6 +115,18 @@
 
 诊断导出使用 `export_diagnostics` 命令和 `diagnostics_export` stage。二次扫描发现疑似
 凭据或用户目录时返回 `DIAGNOSTIC_SECRET_DETECTED`，并阻止生成可下载文件。
+
+助手更新命令也使用同一 envelope：
+
+- `get_assistant_update_status`
+- `check_for_assistant_update`
+- `download_assistant_update`
+- `install_assistant_update`
+- `confirm_assistant_update_health`
+
+更新状态通过独立 `assistant-update-status` 事件发布，不混入 setup 的
+`installer-stage`。更新失败不得改变核心 `SystemStatus.overall`，也不得把
+ChatGPT 或 Router 状态标记为失败。
 
 底层文件、网络和平台函数仍可在 Rust 内部使用 `Result<_, String>`，但字符串错误必须
 在 command 边界转换并经过统一脱敏后才能进入前端。

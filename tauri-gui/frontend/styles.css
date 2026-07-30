@@ -1920,6 +1920,105 @@ select:disabled {
   gap: 12px;
 }
 
+.update-panel {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.update-panel-head {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.update-panel-icon {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.update-panel-icon .icon {
+  width: 17px;
+  height: 17px;
+}
+
+.update-panel h2,
+.update-panel p {
+  margin: 0;
+}
+
+.update-panel h2 {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.update-panel-head p {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.update-progress {
+  margin-top: 14px;
+  padding: 11px 12px;
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+
+.update-progress > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.update-progress .progress-track {
+  margin-top: 8px;
+}
+
+.update-notes {
+  max-height: 76px;
+  margin-top: 12px !important;
+  overflow: auto;
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.update-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.update-panel-footer > span {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.update-panel-footer > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
 @media (max-width: 720px) {
   .repair-panel {
     align-items: stretch;
@@ -1929,6 +2028,15 @@ select:disabled {
 
   .repair-panel > button {
     align-self: flex-start;
+  }
+
+  .update-panel-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .update-panel-footer > div {
+    flex-wrap: wrap;
   }
 }
 

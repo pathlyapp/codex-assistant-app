@@ -1,7 +1,14 @@
 param(
   [ValidateSet("auto", "x64", "arm64")]
   [string]$Architecture = "auto",
-  [string]$LocalRoot = "C:\Temp\codex-assistant-vm-build"
+  [string]$LocalRoot = "C:\Temp\codex-assistant-vm-build",
+  [ValidateSet("none", "mock", "production")]
+  [string]$UpdaterMode = "none",
+  [string]$UpdateEndpoint = "",
+  [string]$UpdatePublicKeyPath = "",
+  [string]$UpdatePrivateKeyPath = "",
+  [ValidateSet("internal-test", "beta", "stable")]
+  [string]$UpdateChannel = "internal-test"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +25,7 @@ if ($sourceFull -eq $localFull) {
 
 New-Item -ItemType Directory -Force $localFull | Out-Null
 & robocopy.exe $sourceFull $localFull /MIR `
-  /XD .git node_modules target artifact `
+  /XD .git .local-update node_modules target artifact `
   /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
 $robocopyCode = $LASTEXITCODE
 if ($robocopyCode -gt 7) {
@@ -35,8 +42,19 @@ $arguments = @(
   "-NoProfile",
   "-ExecutionPolicy", "Bypass",
   "-File", $buildScript,
-  "-Architecture", $Architecture
+  "-Architecture", $Architecture,
+  "-UpdaterMode", $UpdaterMode,
+  "-UpdateChannel", $UpdateChannel
 )
+if ($UpdateEndpoint) {
+  $arguments += @("-UpdateEndpoint", $UpdateEndpoint)
+}
+if ($UpdatePublicKeyPath) {
+  $arguments += @("-UpdatePublicKeyPath", $UpdatePublicKeyPath)
+}
+if ($UpdatePrivateKeyPath) {
+  $arguments += @("-UpdatePrivateKeyPath", $UpdatePrivateKeyPath)
+}
 if (Test-Path (Join-Path $localGui "node_modules\@tauri-apps\cli")) {
   $arguments += "-SkipNpmInstall"
 }

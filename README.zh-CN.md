@@ -142,6 +142,11 @@ git push origin v0.8.4
 
 正式面向客户发布前，还需要接入 Windows 和 macOS 代码签名；签名证书只允许保存在 GitHub Secrets 或受控签名服务中。
 
+助手更新客户端、签名产物构建、本地模拟服务和剩余商业门禁见
+`docs/wp-604a-updater-client.zh-CN.md`。普通构建没有内置更新 endpoint 和公钥时会
+明确显示“未启用”，不会连接临时服务或自动安装。当前能力仍属于内部测试，不改变
+`customerReady=false` 门禁。
+
 测试要求见 `docs/windows-vm-test-plan.zh-CN.md`。
 
 ## 写入位置
