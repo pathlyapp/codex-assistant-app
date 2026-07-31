@@ -743,18 +743,18 @@ fn collect_system_status() -> Result<SystemStatusV1, String> {
         {
             Ok(models) if saved.responses_verified_at.is_some() => (
                 true,
-                format!("Responses 已验证，当前发现 {} 个模型", models.len()),
+                format!("模型请求已验证，当前发现 {} 个模型", models.len()),
             ),
             Ok(models) => (
                 true,
                 format!(
-                    "基础连接可用，发现 {} 个模型；需要重新应用配置以验证 Responses",
+                    "基础连接可用，发现 {} 个模型；重新保存设置后可完成完整验证",
                     models.len()
                 ),
             ),
             Err(error) => (false, friendly_error(&error)),
         },
-        None => (false, "尚未配置 Router".to_string()),
+        None => (false, "尚未设置模型服务".to_string()),
     };
     let router_responses_verified = state
         .as_ref()
@@ -909,7 +909,7 @@ fn revalidate_saved_router() -> Result<String, String> {
     state.responses_protocol = Some(probe.protocol.clone());
     write_state(&paths, &state)?;
     Ok(format!(
-        "Router 已重新验证，模型 {} 可用，协议为 {}",
+        "模型服务已重新验证，模型 {} 可用，协议为 {}",
         state.model, probe.protocol
     ))
 }
@@ -973,20 +973,20 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
         ),
         (
             SetupStageV1::ValidateRouter,
-            "读取 Router 模型",
+            "读取可用模型",
             validate_router,
         ),
         (
             SetupStageV1::ValidateRouterResponse,
-            "验证实际请求",
+            "验证模型可用",
             validate_router_response,
         ),
         (
             SetupStageV1::ConfigureCodex,
-            "写入 Codex 配置",
+            "保存 Codex 设置",
             configure_provider,
         ),
-        (SetupStageV1::Verify, "复核配置", verify_setup),
+        (SetupStageV1::Verify, "最终检查", verify_setup),
     ];
     let mut ctx = InstallContext {
         operation_id: operation_id.clone(),
@@ -997,7 +997,7 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
     };
     let mut results = Vec::new();
     let mut success = true;
-    let mut summary = "ChatGPT 与 Codex Router 已配置完成".to_string();
+    let mut summary = "ChatGPT 和模型服务都已设置完成".to_string();
     let mut failure = None;
 
     for (index, (stage, label, runner)) in stages.iter().enumerate() {
@@ -1050,8 +1050,8 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
                     let rollback_running = StageEventV1::running(
                         &operation_id,
                         SetupStageV1::Rollback,
-                        "自动恢复配置",
-                        "正在恢复写入前的配置",
+                        "自动恢复设置",
+                        "正在恢复写入前的设置",
                         stages.len(),
                         stages.len(),
                         false,
@@ -1068,7 +1068,7 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
                             let rollback_event = rollback_running
                                 .transition(
                                     StageStatusV1::Restored,
-                                    "已自动恢复写入前的配置",
+                                    "已自动恢复写入前的设置",
                                     false,
                                     true,
                                     json!({
@@ -1254,7 +1254,7 @@ fn validate_router(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
     emit_log(app, format!("[OK] Model: {}\n", ctx.options.model));
     emit_log(app, format!("[OK] Available models: {}\n", models.len()));
     ctx.models = models;
-    Ok(StageOutcome::complete(format!("Router 可用，已选择 {}", ctx.options.model)).with_details(
+    Ok(StageOutcome::complete(format!("服务可用，已选择 {}", ctx.options.model)).with_details(
         json!({ "gateway": ctx.options.gateway, "model": ctx.options.model, "modelCount": ctx.models.len() }),
     ))
 }
@@ -1290,7 +1290,7 @@ fn validate_router_response(
         "completed": probe.completed,
     });
     ctx.responses_probe = Some(probe);
-    Ok(StageOutcome::complete("Router 已完成最小 Responses 请求").with_details(details))
+    Ok(StageOutcome::complete("服务已通过测试请求").with_details(details))
 }
 
 fn invalidate_responses_evidence(gateway: &str, model: &str) -> Result<(), String> {
@@ -1383,7 +1383,7 @@ fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<Stage
     emit_log(app, format!("[OK] Provider: {}\n", state.provider_id));
     emit_log(app, format!("[OK] Wire API: {}\n", state.wire_api));
     Ok(
-        StageOutcome::complete("Codex Router 配置已安全写入").with_details(json!({
+        StageOutcome::complete("模型服务设置已安全保存").with_details(json!({
             "configPath": paths.codex_config_path,
             "provider": state.provider_id,
             "model": state.model,
@@ -1599,7 +1599,7 @@ fn restore_configuration_snapshot(paths: &InstallerPaths) -> Result<RestoreResul
             }
             Ok(RestoreResult {
                 restored_from: manifest_path.to_string_lossy().to_string(),
-                message: "已恢复最近一次完整配置；重新打开 ChatGPT 后生效".to_string(),
+                message: "已恢复最近一次的完整设置；重新打开 ChatGPT 后生效".to_string(),
             })
         }
         Err(error) => {
@@ -1648,7 +1648,7 @@ fn disconnect_router_at(paths: &InstallerPaths) -> Result<DisconnectResult, Stri
     if !managed_config_present(&paths.codex_config_path)? {
         return Ok(DisconnectResult {
             changed: false,
-            message: "当前已是官方配置，无需断开".to_string(),
+            message: "当前已是官方设置，无需断开".to_string(),
         });
     }
 
@@ -1680,12 +1680,12 @@ fn disconnect_router_at(paths: &InstallerPaths) -> Result<DisconnectResult, Stri
             }
             Ok(DisconnectResult {
                 changed: true,
-                message: "已从 Codex 配置移除本地 Router，恢复官方默认；重新打开 ChatGPT 后生效"
+                message: "已从 Codex 设置中移除模型服务，恢复官方默认；重新打开 ChatGPT 后生效"
                     .to_string(),
             })
         }
         Err(error) => match transaction.rollback(&rfc3339_timestamp()?, &redact_error(&error)) {
-            Ok(()) => Err(format!("断开 Router 失败，已撤销本次操作: {error}")),
+            Ok(()) => Err(format!("断开模型服务失败，已撤销本次操作: {error}")),
             Err(rollback_error) => Err(rollback_error),
         },
     }
@@ -1776,9 +1776,9 @@ fn run_lifecycle_action_inner(
                 changed,
                 false,
                 if changed {
-                    "已移除助手管理的 Codex 配置，用户的其他配置保持不变".to_string()
+                    "已移除助手管理的 Codex 设置，其他设置保持不变".to_string()
                 } else {
-                    "当前没有助手管理的 Codex 配置".to_string()
+                    "当前没有助手管理的 Codex 设置".to_string()
                 },
             )
         }
@@ -1789,7 +1789,7 @@ fn run_lifecycle_action_inner(
                 changed,
                 false,
                 if changed {
-                    "已删除助手运行数据、备份、主题和保存的 Key".to_string()
+                    "已删除助手运行数据、备份、主题和保存的密钥".to_string()
                 } else {
                     "当前没有助手运行数据".to_string()
                 },
@@ -1811,9 +1811,9 @@ fn run_lifecycle_action_inner(
                 false,
                 app_exit_requested,
                 if app_exit_requested {
-                    "已启动 Codex 助手卸载程序；ChatGPT、Codex 配置和助手数据默认保留".to_string()
+                    "已启动 Codex 助手卸载程序；ChatGPT、Codex 设置和助手数据默认保留".to_string()
                 } else {
-                    "已在 Finder 中定位 Codex 助手；移到废纸篓不会删除 ChatGPT 或配置".to_string()
+                    "已在 Finder 中定位 Codex 助手；移到废纸篓不会删除 ChatGPT 或设置".to_string()
                 },
             )
         }

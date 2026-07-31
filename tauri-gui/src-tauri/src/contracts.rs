@@ -209,13 +209,13 @@ fn recommended_action(input: &SystemStatusInput, ready: bool) -> RecommendedActi
     } else if ready {
         ("open_chatgpt", "打开 ChatGPT")
     } else if !input.app_installed && input.platform == "Windows" {
-        ("install_chatgpt", "安装并配置")
+        ("install_chatgpt", "安装并设置")
     } else if !input.app_installed {
         ("open_install_guide", "查看安装说明")
     } else if !input.config_present {
-        ("configure_router", "开始配置")
+        ("configure_router", "开始设置")
     } else {
-        ("retry_router", "检查 Router")
+        ("retry_router", "检查模型服务")
     };
     RecommendedActionV1 {
         id: id.to_string(),
@@ -593,38 +593,38 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
             "open_install_guide",
         ),
         "ROUTER_URL_INVALID" => (
-            "Router 地址格式不正确",
+            "服务地址格式不正确",
             "请填写以 http:// 或 https:// 开头的完整服务地址。",
             true,
             "edit_gateway",
         ),
         "ROUTER_DNS_FAILED" => (
-            "无法解析 Router 地址",
-            "请检查服务地址、DNS 或企业网络设置。",
+            "服务地址无法解析",
+            "请检查地址是否正确，或网络、DNS 设置。",
             true,
             "edit_gateway",
         ),
         "ROUTER_CONNECTION_REFUSED" => (
-            "Router 拒绝连接",
+            "无法连接模型服务",
             "请确认服务已启动、地址和端口正确，并允许当前设备访问。",
             true,
             "check_router",
         ),
         "ROUTER_TIMEOUT" => (
-            "Router 响应超时",
+            "模型服务响应超时",
             "服务暂时没有响应，请稍后重试或联系服务管理员。",
             true,
             "retry_router",
         ),
         "ROUTER_TLS_FAILED" => (
-            "Router 安全连接失败",
-            "请检查证书、系统时间或企业 CA 配置。",
+            "安全连接失败",
+            "请检查服务证书、系统时间或企业 CA 设置。",
             true,
             "open_diagnostics",
         ),
         "ROUTER_AUTH_FAILED" => (
-            "Access Key 无效",
-            "Router 可以访问，但拒绝了当前 Access Key。",
+            "访问密钥无效",
+            "服务可以连接，但拒绝了当前访问密钥。",
             true,
             "edit_key",
         ),
@@ -647,20 +647,20 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
             "edit_gateway",
         ),
         "ROUTER_MODELS_INVALID" => (
-            "Router 模型接口不兼容",
-            "服务没有返回可用的 OpenAI 兼容模型列表。",
+            "模型列表不兼容",
+            "服务没有返回可用的模型列表（需兼容 OpenAI 接口）。",
             true,
             "check_router",
         ),
         "ROUTER_MODEL_UNAVAILABLE" => (
             "所选模型不可用",
-            "请重新检测 Router 并选择当前可用模型。",
+            "请重新测试连接，并选择当前可用的模型。",
             true,
             "select_model",
         ),
         "ROUTER_RESPONSES_UNSUPPORTED" => (
-            "Router 响应接口不兼容",
-            "服务无法完成最小 Responses 请求，请检查兼容模式或联系服务管理员。",
+            "模型服务接口不兼容",
+            "服务无法完成测试请求，请检查兼容模式或联系服务管理员。",
             true,
             "check_router",
         ),
@@ -671,37 +671,37 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
             "configure_proxy",
         ),
         "CONFIG_PERMISSION_DENIED" => (
-            "无法写入 Codex 配置",
+            "无法写入 Codex 设置",
             "当前用户没有所需文件权限，请修复权限后重试。",
             true,
             "repair_permissions",
         ),
         "CONFIG_PARSE_FAILED" => (
-            "现有 Codex 配置无法读取",
+            "现有 Codex 设置无法读取",
             "配置文件格式异常，请先导出诊断或恢复备份。",
             true,
             "restore_config",
         ),
         "CONFIG_OVERRIDDEN" => (
-            "Codex 配置被更高优先级覆盖",
-            "项目或管理员配置覆盖了当前用户配置，请查看实际生效来源。",
+            "Codex 设置被更高优先级覆盖",
+            "项目或管理员设置覆盖了当前用户设置，请查看实际生效来源。",
             true,
             "show_effective_source",
         ),
         "CONFIG_VERIFY_FAILED" => (
-            "Codex 配置复核失败",
-            "写入结果没有通过复核，请恢复配置后重试。",
+            "Codex 设置检查未通过",
+            "写入结果没有通过检查，请恢复设置后重试。",
             true,
             "restore_config",
         ),
         "ROLLBACK_FAILED" => (
-            "配置自动恢复失败",
-            "请停止继续修改并联系支持人员处理现有文件和快照。",
+            "设置自动恢复失败",
+            "请停止继续修改并联系支持人员处理现有文件和备份。",
             false,
             "contact_support",
         ),
         "SECRET_STORE_FAILED" => (
-            "Access Key 无法安全保存",
+            "访问密钥无法安全保存",
             "系统凭据存储不可用，请修复后重试。",
             true,
             "open_diagnostics",
@@ -750,13 +750,13 @@ fn error_copy(code: &str) -> (&'static str, &'static str, bool, &'static str) {
         ),
         "LIFECYCLE_CONFIRMATION_REQUIRED" => (
             "需要重新确认",
-            "该操作会修改配置、数据或助手安装，请阅读影响后再次确认。",
+            "该操作会修改设置、数据或助手安装，请阅读影响后再次确认。",
             true,
             "confirm_lifecycle_action",
         ),
         "LIFECYCLE_DATA_IN_USE" => (
-            "助手数据仍被 Codex 配置使用",
-            "请先恢复助手修改前的 Codex 配置，再删除助手运行数据。",
+            "助手数据仍被 Codex 设置使用",
+            "请先恢复助手修改前的 Codex 设置，再删除助手运行数据。",
             true,
             "restore_pre_assistant_config",
         ),

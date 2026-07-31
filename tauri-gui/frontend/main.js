@@ -33,33 +33,33 @@ const ICONS = {
 };
 
 const TASKS = [
-  { id: "preflight", label: "检查本机环境", waiting: "检查配置目录和系统安装能力" },
+  { id: "preflight", label: "检查本机环境", waiting: "检查系统环境和安装条件" },
   { id: "install_chatgpt", label: "准备 ChatGPT", waiting: "检测官方应用，缺失时通过 Microsoft Store 安装" },
-  { id: "validate_router", label: "读取 Router 模型", waiting: "连接 /v1/models 并核对模型" },
-  { id: "validate_router_response", label: "验证实际请求", waiting: "发送固定低成本请求并确认 /v1/responses 可用" },
-  { id: "configure_codex", label: "写入 Codex 配置", waiting: "安全保存认证信息并更新 config.toml" },
-  { id: "verify", label: "复核配置", waiting: "再次检查应用、配置和 Router" },
+  { id: "validate_router", label: "读取可用模型", waiting: "连接服务并获取模型列表" },
+  { id: "validate_router_response", label: "验证模型可用", waiting: "发送一次测试请求，确认模型能正常回复" },
+  { id: "configure_codex", label: "保存 Codex 设置", waiting: "加密保存密钥，并更新 Codex 配置文件" },
+  { id: "verify", label: "最终检查", waiting: "再次检查应用、设置和模型服务" },
 ];
 
 const GUIDED_STEPS = ["environment", "app", "service", "verify"];
 const LIFECYCLE_ACTIONS = {
   uninstall_assistant: {
     title: "卸载 Codex 助手？",
-    message: "只启动助手自己的系统卸载程序。ChatGPT、Codex 配置和助手数据都会保留。",
+    message: "只启动助手自己的系统卸载程序。ChatGPT、Codex 设置和助手数据都会保留。",
     confirmLabel: "卸载助手",
     confirmation: "UNINSTALL_ASSISTANT",
     danger: true,
   },
   restore_pre_assistant_config: {
-    title: "恢复助手修改前的 Codex 配置？",
-    message: "将移除助手管理的 Router 配置，同时保留 config.toml 中其他用户配置。操作使用可回滚事务。",
-    confirmLabel: "恢复原配置",
+    title: "恢复助手修改前的 Codex 设置？",
+    message: "将移除助手设置的模型服务，保留 Codex 配置文件中的其他内容。操作前会自动备份，可随时撤销。",
+    confirmLabel: "恢复原设置",
     confirmation: "RESTORE_MANAGED_CONFIGURATION",
     danger: false,
   },
   delete_assistant_data: {
     title: "永久删除助手数据？",
-    message: "将删除本地状态、事务备份、主题和保存的 Key。ChatGPT 和非助手管理的 Codex 配置不受影响。",
+    message: "将删除本机的运行状态、设置备份、主题和保存的密钥。ChatGPT 和非助手管理的 Codex 设置不受影响。",
     confirmLabel: "删除助手数据",
     confirmation: "DELETE_ASSISTANT_DATA",
     danger: true,
@@ -79,10 +79,10 @@ const STAGE_GUIDED_STEP = {
 };
 
 const VIEW_COPY = {
-  overview: ["首页", "确认 ChatGPT 与 Codex 服务状态"],
-  setup: ["服务配置", "连接 Router 并设置 Codex 默认模型"],
+  overview: ["首页", "查看 ChatGPT 与模型服务是否就绪"],
+  setup: ["模型服务", "连接模型服务，并选择 Codex 默认使用的模型"],
   appearance: ["主题换肤", "切换 ChatGPT 工作界面与自定义背景"],
-  diagnostics: ["帮助与诊断", "检查环境并导出脱敏诊断信息"],
+  diagnostics: ["帮助与诊断", "检查环境，或导出已隐去隐私信息的诊断结果"],
 };
 
 const tauri = window.__TAURI__;
@@ -248,7 +248,7 @@ async function refreshStatus({ hydrateForm = false } = {}) {
   const button = $("#refreshButton");
   button.disabled = true;
   button.classList.add("spinning");
-  if (!state.status) setReadiness("loading", "正在检查本机状态", "正在读取官方应用、Codex 配置和 Router。", "请稍候");
+  if (!state.status) setReadiness("loading", "正在检查本机状态", "正在检查 ChatGPT、Codex 设置和模型服务。", "请稍候");
   try {
     const status = normalizeSystemStatus(await tauri.core.invoke("get_system_status"));
     state.status = status;
@@ -272,12 +272,12 @@ function renderSystemStatus(status) {
   const appNeedsRepair = status.appState === "needs_repair";
   const recommendedAction = status.recommendedAction || {
     id: ready ? "open_chatgpt" : "configure_router",
-    label: ready ? "打开 ChatGPT" : "开始配置",
+    label: ready ? "打开 ChatGPT" : "开始设置",
   };
   if (ready) {
     setReadiness(
       "ready",
-      "Codex 已准备就绪",
+      "一切就绪",
       `${status.configuredModel} 已连接，可以从 ChatGPT 进入 Codex。`,
       recommendedAction.label,
     );
@@ -285,11 +285,11 @@ function renderSystemStatus(status) {
     const missing = [];
     if (appNeedsRepair) missing.push("ChatGPT 安装需要修复");
     else if (!status.appInstalled) missing.push("ChatGPT");
-    if (!status.configPresent) missing.push("Codex 配置");
-    if (!status.routerReachable) missing.push("Router 连接");
+    if (!status.configPresent) missing.push("Codex 设置");
+    if (!status.routerReachable) missing.push("模型服务连接");
     setReadiness(
       "attention",
-      appNeedsRepair ? "ChatGPT 安装需要修复" : status.overall === "blocked" ? "Router 当前不可用" : "还需要完成配置",
+      appNeedsRepair ? "ChatGPT 安装需要修复" : status.overall === "blocked" ? "模型服务当前不可用" : "还需要完成设置",
       `待处理：${missing.join("、") || "重新检查状态"}`,
       recommendedAction.label,
     );
@@ -313,24 +313,24 @@ function renderSystemStatus(status) {
   setStatusCard(
     "router",
     status.routerReachable,
-    status.routerReachable ? "Router 可用" : status.configuredGateway ? "Router 不可用" : "尚未配置",
+    status.routerReachable ? "模型服务正常" : status.configuredGateway ? "模型服务不可用" : "尚未设置",
     status.routerDetail,
   );
   setStatusCard(
     "config",
     status.configPresent,
-    status.configPresent ? "配置有效" : "配置未完成",
-    status.configPresent ? status.configPath : "需要写入 Codex Router 配置",
+    status.configPresent ? "设置有效" : "设置未完成",
+    status.configPresent ? status.configPath : "还没有设置模型服务",
   );
 
-  $("#currentGateway").textContent = status.configuredGateway || "未配置";
-  $("#currentModel").textContent = status.configuredModel || "未配置";
-  $("#currentKeyState").textContent = status.keyConfigured ? "已安全保存" : status.configPresent ? "无需 Key" : "未配置";
+  $("#currentGateway").textContent = status.configuredGateway || "未设置";
+  $("#currentModel").textContent = status.configuredModel || "未设置";
+  $("#currentKeyState").textContent = status.keyConfigured ? "已加密保存" : status.configPresent ? "无需密钥" : "未设置";
   $("#restoreConfigButton").classList.toggle("hidden", !status.backupAvailable);
   $("#disconnectRouterButton").classList.toggle("hidden", !status.configPresent);
   $("#diagPlatform").textContent = `${status.platform} · ${formatArchitecture(status.architecture)}`;
   $("#diagApp").textContent = `${status.appInstalled ? "正常" : appNeedsRepair ? "需要修复" : "未安装"} · ${status.appDetail}`;
-  $("#diagConfig").textContent = status.configPresent ? `有效 · ${status.configuredModel}` : "未配置";
+  $("#diagConfig").textContent = status.configPresent ? `有效 · ${status.configuredModel}` : "未设置";
   $("#diagRouter").textContent = `${status.routerReachable ? "正常" : "异常"} · ${status.routerDetail}`;
   $("#diagConfigPath").textContent = status.configPath;
   renderSetupPrerequisites(status);
@@ -422,7 +422,7 @@ function hydrateRouterForm(status) {
     setConnectionResult("success", status.routerDetail);
     setModelReady(true, status.configuredModel ? 1 : 0);
   } else {
-    setConnectionResult("neutral", status.configuredGateway ? status.routerDetail : "先测试连接，助手会读取 Router 的真实模型列表。");
+    setConnectionResult("neutral", status.configuredGateway ? status.routerDetail : "先测试连接，成功后会列出服务上可用的模型。");
     setModelReady(false, 0);
   }
   state.formDirty = false;
@@ -595,8 +595,8 @@ function updateAuthFields() {
   $("#keyInput").placeholder = noAuth
     ? "Ollama 默认无需填写"
     : state.status?.keyConfigured
-      ? "已安全保存；留空保持不变"
-      : "输入 Router Access Key";
+      ? "已加密保存；留空保持不变"
+      : "输入访问密钥";
   state.formDirty = true;
   invalidateConnectionTest();
 }
@@ -604,7 +604,7 @@ function updateAuthFields() {
 function toggleKeyVisibility() {
   state.keyVisible = !state.keyVisible;
   $("#keyInput").type = state.keyVisible ? "text" : "password";
-  $("#toggleKeyButton").title = state.keyVisible ? "隐藏 Access Key" : "显示 Access Key";
+  $("#toggleKeyButton").title = state.keyVisible ? "隐藏访问密钥" : "显示访问密钥";
   $("#toggleKeyButton").setAttribute("aria-label", $("#toggleKeyButton").title);
   $("#toggleKeyButton .icon").innerHTML = state.keyVisible ? ICONS.eyeOff : ICONS.eye;
 }
@@ -619,7 +619,7 @@ function invalidateConnectionTest() {
     state.testedGateway = "";
     state.testedWithKeyState = "";
     setModelReady(false, 0);
-    setConnectionResult("neutral", "配置已修改，请重新测试连接。");
+    setConnectionResult("neutral", "设置已修改，请重新测试连接。");
   }
 }
 
@@ -636,12 +636,12 @@ async function testRouter({ announce = false } = {}) {
   const key = noAuth ? "" : $("#keyInput").value.trim();
   const useSavedKey = !noAuth && !key && Boolean(state.status?.keyConfigured) && gateway === state.status?.configuredGateway;
   if (!gateway) {
-    setConnectionResult("error", "请填写 Router URL。");
+    setConnectionResult("error", "请填写服务地址。");
     $("#gatewayInput").focus();
     return false;
   }
   if (!noAuth && !key && !useSavedKey) {
-    setConnectionResult("error", "请填写 Access Key，或选择“无需 Key”。");
+    setConnectionResult("error", "请填写访问密钥，或勾选“该服务不需要密钥”。");
     $("#keyInput").focus();
     return false;
   }
@@ -649,7 +649,7 @@ async function testRouter({ announce = false } = {}) {
   button.disabled = true;
   button.querySelector(".icon").innerHTML = ICONS.loader;
   button.querySelector(".icon").classList.add("spin");
-  setConnectionResult("testing", "正在连接 Router 并读取模型列表…");
+  setConnectionResult("testing", "正在连接服务并读取模型列表…");
   setGuidedStep("service");
   try {
     const response = await tauri.core.invoke("discover_models", {
@@ -663,7 +663,7 @@ async function testRouter({ announce = false } = {}) {
     populateModels(state.models, selected || state.models[0]);
     setModelReady(true, state.models.length);
     setConnectionResult("success", response.message);
-    if (announce) showToast("Router 连接正常");
+    if (announce) showToast("连接成功");
     return true;
   } catch (error) {
     state.models = [];
@@ -697,7 +697,7 @@ function populateModels(models, selected) {
   const select = $("#modelInput");
   select.replaceChildren();
   if (!models.length) {
-    select.add(new Option("测试连接后选择", ""));
+    select.add(new Option("测试连接后可选", ""));
     select.disabled = true;
     return;
   }
@@ -714,8 +714,8 @@ function setModelReady(ready, count = 0) {
   badge.textContent = ready ? `${count} 个模型` : "尚未连接";
   badge.className = `status-badge ${ready ? "success" : "neutral"}`;
   $("#modelSectionHelp").textContent = ready
-    ? "连接已验证，请选择 Codex 默认模型。"
-    : "连接成功后可选择 Router 返回的真实模型。";
+    ? "连接成功，请选择一个默认模型。"
+    : "连接成功后，这里会列出服务中可用的模型。";
   setGuidedStep("service");
 }
 
@@ -879,10 +879,10 @@ function showResult(payload) {
   const mark = $("#resultMark");
   mark.className = `result-mark ${success ? "success" : "error"}`;
   mark.querySelector(".icon").innerHTML = success ? ICONS.check : ICONS.alert;
-  $("#resultTitle").textContent = success ? "配置完成" : "配置未完成";
+  $("#resultTitle").textContent = success ? "设置完成" : "设置未完成";
   $("#resultText").textContent = success
-    ? "配置已写入并通过验证。重启 ChatGPT 后即可使用新的 Codex 模型服务。"
-    : `${payload.summary || "请根据失败步骤修正后重试。"}，日志中没有保存 Access Key 明文。`;
+    ? "设置已保存并通过验证。重启 ChatGPT 后，Codex 就会使用新的模型服务。"
+    : `${payload.summary || "请根据失败步骤修正后重试。"}，日志中没有保存密钥明文。`;
   $("#launchButton").classList.toggle("hidden", !success);
   $("#resultBackButton").textContent = success ? "返回修改" : "修正并重试";
   $("#resultBackButton").className = success ? "secondary-button" : "primary-button";
@@ -905,10 +905,10 @@ function renderResultSummary(success, payload) {
     addSummaryRow(
       summary,
       "ChatGPT",
-      state.status?.appInstalled ? "官方应用已确认" : "安装状态待复核",
+      state.status?.appInstalled ? "官方应用已确认" : "安装状态待检查",
       "app",
     );
-    addSummaryRow(summary, "Router", safeGateway($("#gatewayInput").value), "router");
+    addSummaryRow(summary, "模型服务", safeGateway($("#gatewayInput").value), "router");
     addSummaryRow(summary, "模型", $("#modelInput").value, "model");
     addSummaryRow(
       summary,
@@ -919,17 +919,17 @@ function renderResultSummary(success, payload) {
     addSummaryRow(
       summary,
       "恢复能力",
-      state.status?.backupAvailable ? "可恢复到上次配置" : "已记录本次配置事务",
+      state.status?.backupAvailable ? "可恢复到上次设置" : "已记录本次设置备份",
       "recovery",
     );
   } else {
     const stages = payload.stages || [];
     const failed = stages.find((stage) => stage.stage === "rollback" && stage.status === "failed")
       || stages.find((stage) => stage.status === "failed");
-    addSummaryRow(summary, "失败步骤", failed?.label || payload.summary || "启动配置", "failed-stage");
+    addSummaryRow(summary, "失败步骤", failed?.label || payload.summary || "开始设置", "failed-stage");
     addSummaryRow(summary, "原因", failed?.message || payload.summary || "未知错误", "failure-reason");
     if (payload.failure?.code) addSummaryRow(summary, "错误代码", payload.failure.code, "error-code");
-    addSummaryRow(summary, "建议操作", "修正连接信息后重新验证", "recommended-action");
+    addSummaryRow(summary, "建议操作", "修改连接信息后重新验证", "recommended-action");
   }
 }
 
@@ -947,7 +947,7 @@ function renderRecoveryStatus(payload) {
   } else if (rollback?.status === "failed") {
     recovery.className = "result-recovery failed";
     recovery.dataset.recoveryState = "failed";
-    recoveryText.textContent = "自动恢复失败。请先复制诊断信息，不要继续修改配置。";
+    recoveryText.textContent = "自动恢复失败。请先复制诊断信息，不要继续修改设置。";
   }
 }
 
@@ -998,9 +998,9 @@ async function installChatGPT({ continueToSetup = false } = {}) {
   const confirmed = await requestConfirmation({
     title: "下载并安装 ChatGPT？",
     message: continueToSetup
-      ? "助手将先通过 Microsoft Store 官方渠道下载并安装 ChatGPT（可能需要几分钟，期间可能出现系统确认窗口），完成后继续服务配置。"
+      ? "助手将先通过 Microsoft Store 官方渠道下载并安装 ChatGPT（可能需要几分钟，期间可能出现系统确认窗口），完成后继续设置模型服务。"
       : "助手将调用 Microsoft Store 官方安装渠道下载并安装 ChatGPT，过程可能需要几分钟，期间可能出现系统确认窗口。",
-    confirmLabel: continueToSetup ? "安装并配置" : "开始安装",
+    confirmLabel: continueToSetup ? "安装并设置" : "开始安装",
   });
   if (!confirmed) return;
   state.installingApp = true;
@@ -1022,7 +1022,7 @@ async function installChatGPT({ continueToSetup = false } = {}) {
     setBadge($("#setupAppState"), "未完成", "error");
     setGuidedStep("app", { failed: true });
     if (continueToSetup) {
-      setReadiness("attention", "还需要完成配置", "ChatGPT 安装未完成，可点击重试安装。", "安装并配置");
+      setReadiness("attention", "还需要完成设置", "ChatGPT 安装未完成，可点击重试安装。", "安装并设置");
     }
     showToast(friendlyError(error), true);
   } finally {
@@ -1073,7 +1073,7 @@ async function restartChatGPT() {
   if (!tauri?.core) return;
   const confirmed = await requestConfirmation({
     title: "重启 ChatGPT？",
-    message: "ChatGPT 将关闭后重新打开，以加载新的 Codex 配置。请先保存尚未发送的内容。",
+    message: "ChatGPT 将关闭后重新打开，以应用新的 Codex 设置。请先保存尚未发送的内容。",
     confirmLabel: "重启并打开",
   });
   if (!confirmed) return;
@@ -1094,8 +1094,8 @@ async function restartChatGPT() {
 async function restoreConfiguration() {
   if (!tauri?.core || !state.status?.backupAvailable) return;
   const confirmed = await requestConfirmation({
-    title: "恢复上次配置？",
-    message: "助手会先保留当前配置，再恢复最近一次备份并重启 ChatGPT。请先保存尚未发送的内容。",
+    title: "恢复上次的设置？",
+    message: "助手会先备份当前设置，再恢复最近一次备份并重启 ChatGPT。请先保存尚未发送的内容。",
     confirmLabel: "恢复并重启",
   });
   if (!confirmed) return;
@@ -1107,7 +1107,7 @@ async function restoreConfiguration() {
     const result = await tauri.core.invoke("restore_codex_config");
     try {
       await tauri.core.invoke("restart_chatgpt");
-      showToast("上次配置已恢复，ChatGPT 已重新打开");
+      showToast("已恢复上次的设置，ChatGPT 已重新打开");
     } catch (restartError) {
       showToast(`${result.message}；${friendlyError(restartError)}`, true);
     }
@@ -1125,8 +1125,8 @@ async function restoreConfiguration() {
 async function disconnectRouter() {
   if (!tauri?.core || !state.status?.configPresent || state.running || state.lifecycleRunning) return;
   const confirmed = await requestConfirmation({
-    title: "断开本地 Router？",
-    message: "将从 Codex 配置中移除助手写入的 Router 内容并重启 ChatGPT，恢复官方默认行为。已保存的 Router 地址、Key 和配置备份都会保留，可随时重新应用或恢复。",
+    title: "断开模型服务？",
+    message: "将从 Codex 设置中移除助手添加的模型服务并重启 ChatGPT，恢复官方默认。已保存的服务地址、密钥和设置备份都会保留，可随时重新设置或恢复。",
     confirmLabel: "断开并重启",
   });
   if (!confirmed) return;
@@ -1137,7 +1137,7 @@ async function disconnectRouter() {
     if (result.changed) {
       try {
         await tauri.core.invoke("restart_chatgpt");
-        showToast("已断开 Router，ChatGPT 已使用官方配置重新打开");
+        showToast("已断开模型服务，ChatGPT 已恢复官方设置并重新打开");
       } catch (restartError) {
         showToast(`${result.message}；${friendlyError(restartError)}`, true);
       }
@@ -1230,7 +1230,7 @@ async function installAssistantUpdate() {
   const confirmed = await requestConfirmation({
     title: `安装 Codex 助手 ${nextVersion}？`,
     message:
-      "安装时助手会自动关闭并重新启动。ChatGPT、Router 配置、Key、主题和诊断数据不会被修改。",
+      "安装时助手会自动关闭并重新启动。ChatGPT、模型服务设置、密钥、主题和诊断数据都不会受影响。",
     confirmLabel: "安装并重启",
   });
   if (!confirmed || isApplicationBusy()) return;
@@ -1382,8 +1382,8 @@ async function refreshLifecycleStatus() {
 function renderLifecycleStatusLoading() {
   setBadge($("#lifecycleState"), "检查中", "pending");
   $("#assistantUninstallDetail").textContent = "正在检查系统卸载入口。";
-  $("#managedConfigDetail").textContent = "正在检查助手管理的配置。";
-  $("#assistantDataDetail").textContent = "正在检查本地状态、备份、主题和 Key。";
+  $("#managedConfigDetail").textContent = "正在检查助手管理的设置。";
+  $("#assistantDataDetail").textContent = "正在检查本机状态、备份、主题和密钥。";
   $("#officialAppManagementDetail").textContent = "正在检查 ChatGPT 官方应用。";
   [
     "#uninstallAssistantButton",
@@ -1403,24 +1403,24 @@ function renderLifecycleStatus(status) {
   uninstallButton.disabled = busy || !status.assistantUninstallAvailable;
   $("#assistantUninstallDetail").textContent =
     status.assistantUninstallMode === "nsis"
-      ? "系统卸载只移除助手程序，默认保留 ChatGPT、Codex 配置和助手数据。"
+      ? "系统卸载只移除助手程序，默认保留 ChatGPT、Codex 设置和助手数据。"
       : status.assistantUninstallMode === "finder"
-        ? "助手会在 Finder 中定位应用；移到废纸篓不会删除 ChatGPT 或配置。"
+        ? "助手会在 Finder 中定位应用；移到废纸篓不会删除 ChatGPT 或设置。"
         : "当前不是完整安装版，请通过系统应用管理或重新安装后卸载。";
 
   const configButton = $("#restoreManagedConfigButton");
   configButton.disabled = busy || !status.managedConfigPresent;
   $("#managedConfigDetail").textContent = status.managedConfigPresent
-    ? "检测到助手管理的 Router 配置；恢复时保留其他用户设置。"
-    : "没有助手管理的 Codex 配置，无需恢复。";
+    ? "检测到助手设置的模型服务；恢复时会保留你的其他设置。"
+    : "没有助手管理的 Codex 设置，无需恢复。";
 
   const dataButton = $("#deleteAssistantDataButton");
   dataButton.disabled = busy || !status.assistantDataPresent || status.dataRemovalBlocked;
   $("#assistantDataDetail").textContent = !status.assistantDataPresent
     ? "没有助手运行数据。"
     : status.dataRemovalBlocked
-      ? "当前仍被 Codex 配置使用，请先恢复原配置。"
-      : "可单独删除本地状态、备份、主题和保存的 Key。";
+      ? "当前仍被 Codex 设置使用，请先恢复原设置。"
+      : "可单独删除本机状态、备份、主题和保存的密钥。";
 
   const officialButton = $("#openOfficialAppManagementButton");
   officialButton.disabled = busy || !status.officialAppInstalled;
@@ -1432,7 +1432,7 @@ function renderLifecycleStatus(status) {
 function renderLifecycleStatusError(error) {
   setBadge($("#lifecycleState"), "检查失败", "error");
   $("#assistantUninstallDetail").textContent = friendlyError(error);
-  $("#managedConfigDetail").textContent = "未执行任何配置修改。";
+  $("#managedConfigDetail").textContent = "未执行任何设置修改。";
   $("#assistantDataDetail").textContent = "未执行任何数据删除。";
   $("#officialAppManagementDetail").textContent = "未执行任何官方应用操作。";
   [
@@ -1991,8 +1991,8 @@ function normalizeSystemStatus(status = {}) {
   const action = ready
     ? { id: "open_chatgpt", label: "打开 ChatGPT" }
     : !status.appInstalled && status.platform === "Windows"
-      ? { id: "install_chatgpt", label: "安装并配置" }
-      : { id: "configure_router", label: "开始配置" };
+      ? { id: "install_chatgpt", label: "安装并设置" }
+      : { id: "configure_router", label: "开始设置" };
   return {
     ...status,
     schemaVersion: status.schemaVersion || 0,

@@ -23,7 +23,7 @@
             <span class="icon" data-icon="home"></span><span>首页</span>
           </button>
           <button class="nav-item" type="button" data-view="setup">
-            <span class="icon" data-icon="route"></span><span>服务配置</span>
+            <span class="icon" data-icon="route"></span><span>模型服务</span>
           </button>
           <button class="nav-item" type="button" data-view="appearance">
             <span class="icon" data-icon="palette"></span><span>主题换肤</span>
@@ -43,7 +43,7 @@
         <header class="topbar">
           <div>
             <h1 id="pageTitle">首页</h1>
-            <p id="pageSubtitle">确认 ChatGPT 与 Codex 服务状态</p>
+            <p id="pageSubtitle">查看 ChatGPT 与模型服务是否就绪</p>
           </div>
           <div class="topbar-actions">
             <button id="applyAppearanceButton" class="primary-button hidden" type="button">应用并重启 ChatGPT</button>
@@ -63,7 +63,7 @@
             <div class="readiness-icon"><span class="icon" data-icon="loader"></span></div>
             <div class="readiness-copy">
               <h2 id="readinessTitle">正在检查本机状态</h2>
-              <p id="readinessText">正在确认 ChatGPT、Router 和 Codex 配置</p>
+              <p id="readinessText">正在检查 ChatGPT、模型服务和 Codex 设置</p>
             </div>
             <button id="overviewAction" class="primary-button" type="button" disabled>请稍候</button>
           </div>
@@ -72,7 +72,7 @@
             <div class="section-title-row">
               <div>
                 <h2 id="environmentTitle">环境检查</h2>
-                <p>结果来自当前 Windows 用户环境。</p>
+                <p>检查结果仅针对当前 Windows 用户。</p>
               </div>
               <span id="overallStatusBadge" class="status-badge pending">检查中</span>
             </div>
@@ -93,7 +93,7 @@
               <article class="check-row" id="routerStatusCard">
                 <div class="check-row-icon"><span class="icon" data-icon="route"></span></div>
                 <div class="check-row-copy">
-                  <strong id="routerStatusTitle">正在检测 Router</strong>
+                  <strong id="routerStatusTitle">正在检测模型服务</strong>
                   <small id="routerStatusDetail">请稍候</small>
                 </div>
                 <span id="routerStatusBadge" class="status-badge pending">检查中</span>
@@ -101,7 +101,7 @@
               <article class="check-row" id="configStatusCard">
                 <div class="check-row-icon"><span class="icon" data-icon="fileCheck"></span></div>
                 <div class="check-row-copy">
-                  <strong id="configStatusTitle">正在检测 Codex 配置</strong>
+                  <strong id="configStatusTitle">正在检测 Codex 设置</strong>
                   <small id="configStatusDetail">请稍候</small>
                 </div>
                 <span id="configStatusBadge" class="status-badge pending">检查中</span>
@@ -112,29 +112,29 @@
           <section class="current-config" aria-labelledby="currentConfigTitle">
             <div class="section-title-row">
               <div>
-                <h2 id="currentConfigTitle">当前服务</h2>
-                <p>仅作用于 ChatGPT 中的 Codex 功能。</p>
+                <h2 id="currentConfigTitle">当前设置</h2>
+                <p>这些设置只对 ChatGPT 中的 Codex 功能生效。</p>
               </div>
               <div class="section-actions">
                 <button id="disconnectRouterButton" class="ghost-button hidden" type="button">
-                  <span class="icon" data-icon="unplug"></span><span>断开 Router</span>
+                  <span class="icon" data-icon="unplug"></span><span>断开模型服务</span>
                 </button>
                 <button id="restoreConfigButton" class="ghost-button hidden" type="button">
-                  <span class="icon" data-icon="rotateCcw"></span><span>恢复上次配置</span>
+                  <span class="icon" data-icon="rotateCcw"></span><span>恢复上次设置</span>
                 </button>
-                <button id="editConfigButton" class="secondary-button" type="button">修改配置</button>
+                <button id="editConfigButton" class="secondary-button" type="button">修改设置</button>
               </div>
             </div>
             <dl class="config-list">
-              <div><dt>Router</dt><dd id="currentGateway">未配置</dd></div>
-              <div><dt>默认模型</dt><dd id="currentModel">未配置</dd></div>
-              <div><dt>访问凭证</dt><dd id="currentKeyState">未配置</dd></div>
+              <div><dt>模型服务</dt><dd id="currentGateway">未设置</dd></div>
+              <div><dt>默认模型</dt><dd id="currentModel">未设置</dd></div>
+              <div><dt>访问密钥</dt><dd id="currentKeyState">未设置</dd></div>
             </dl>
           </section>
         </section>
 
         <section id="setupView" class="view" data-view-panel="setup">
-          <div id="setupStepper" class="compact-stepper" role="list" aria-label="配置步骤">
+          <div id="setupStepper" class="compact-stepper" role="list" aria-label="设置步骤">
             <span class="active" data-guided-step="environment" role="listitem" aria-current="step"><b>1</b><em>环境检测</em></span>
             <i aria-hidden="true"></i>
             <span data-guided-step="app" role="listitem"><b>2</b><em>安装或修复</em></span>
@@ -173,9 +173,9 @@
               <section class="form-section">
                 <div class="section-heading">
                   <div>
-                    <span class="section-kicker">服务配置</span>
-                    <h2>连接模型服务</h2>
-                    <p>填写 OpenAI 兼容服务地址，助手会自动规范为 <code>/v1</code>。</p>
+                    <span class="section-kicker">模型服务</span>
+                    <h2>连接你的模型服务</h2>
+                    <p>填写服务提供方给你的接口地址，助手会自动补全所需路径。</p>
                   </div>
                   <button id="ollamaPresetButton" type="button" class="text-button" data-preset="ollama">
                     填写本机 Ollama 地址
@@ -183,49 +183,49 @@
                 </div>
 
                 <label class="field full-field" for="gatewayInput">
-                  <span>Router URL</span>
+                  <span>服务地址</span>
                   <div class="input-action-row">
                     <span class="input-shell"><span class="icon" data-icon="link"></span><input id="gatewayInput" value="http://127.0.0.1:11434/v1" autocomplete="url" spellcheck="false" /></span>
                     <button id="testRouterButton" class="secondary-button" type="button">
-                      <span class="icon" data-icon="plug"></span><span>测试并读取模型</span>
+                      <span class="icon" data-icon="plug"></span><span>测试连接</span>
                     </button>
                   </div>
-                  <small id="gatewayHelp">支持 HTTP/HTTPS；正式服务建议使用 HTTPS。</small>
+                  <small id="gatewayHelp">以 http:// 或 https:// 开头的完整地址，服务需兼容 OpenAI 接口。</small>
                 </label>
 
                 <div class="auth-row">
                   <div class="field-group">
                     <div class="field-label-row">
-                      <label for="keyInput">Access Key</label>
+                      <label for="keyInput">访问密钥</label>
                       <label class="switch-control">
                         <input id="noAuthInput" type="checkbox" checked />
                         <span class="switch-track"></span>
-                        <span>该服务无需 Key</span>
+                        <span>该服务不需要密钥</span>
                       </label>
                     </div>
                     <div class="input-shell secret-input disabled" id="keyShell">
                       <span class="icon" data-icon="key"></span>
                       <input id="keyInput" type="password" autocomplete="off" disabled placeholder="无需填写" />
-                      <button id="toggleKeyButton" class="inline-icon-button" type="button" title="显示 Access Key" aria-label="显示 Access Key" disabled>
+                      <button id="toggleKeyButton" class="inline-icon-button" type="button" title="显示访问密钥" aria-label="显示访问密钥" disabled>
                         <span class="icon" data-icon="eye"></span>
                       </button>
                     </div>
-                    <small id="keyHelp">使用当前 Windows 用户 DPAPI 加密，不写入 Codex 配置文件。</small>
+                    <small id="keyHelp">密钥会用 Windows 系统加密保存在本机，不会写入 Codex 配置文件。</small>
                   </div>
                 </div>
 
                 <div id="connectionResult" class="connection-result neutral">
                   <span class="icon" data-icon="info"></span>
-                  <span>填写服务信息后测试连接。</span>
+                  <span>填好地址后，点击“测试连接”。</span>
                 </div>
               </section>
 
               <section id="modelSection" class="form-section model-section locked">
                 <div class="section-heading">
                   <div>
-                    <span class="section-kicker">模型配置</span>
+                    <span class="section-kicker">模型选择</span>
                     <h2>选择默认模型</h2>
-                    <p id="modelSectionHelp">连接成功后可选择 Router 返回的真实模型。</p>
+                    <p id="modelSectionHelp">连接成功后，这里会列出服务中可用的模型。</p>
                   </div>
                   <span id="modelCountBadge" class="status-badge neutral">尚未连接</span>
                 </div>
@@ -237,14 +237,14 @@
                       <option value="">请先测试连接</option>
                     </select>
                   </span>
-                  <small>该模型会显示在 ChatGPT 的 Codex 工作界面中。</small>
+                  <small>Codex 会默认使用这个模型。</small>
                 </label>
               </section>
 
               <div class="form-footer">
-                <div class="official-note"><span class="icon" data-icon="shieldCheck"></span><span>ChatGPT 缺失时仅调用 Microsoft Store 官方安装渠道。配置完成前不会启动 ChatGPT。</span></div>
+                <div class="official-note"><span class="icon" data-icon="shieldCheck"></span><span>如果没装 ChatGPT，助手只会通过 Microsoft Store 官方渠道安装。设置完成前不会打开 ChatGPT。</span></div>
                 <button id="applyButton" class="primary-button" type="submit" disabled>
-                  <span>应用并验证</span><span class="icon" data-icon="arrowRight"></span>
+                  <span>保存并验证</span><span class="icon" data-icon="arrowRight"></span>
                 </button>
               </div>
             </form>
@@ -253,9 +253,9 @@
           <section id="progressPanel" class="progress-panel hidden" aria-live="polite">
             <div class="progress-heading">
               <div>
-                <span id="progressKicker">正在配置</span>
+                <span id="progressKicker">正在设置</span>
                 <h2 id="progressTitle">准备 ChatGPT 与 Codex</h2>
-                <p id="progressSubtitle">请保持窗口打开，完成前不会启动 ChatGPT。</p>
+                <p id="progressSubtitle">请保持窗口打开，完成前不会打开 ChatGPT。</p>
               </div>
               <strong id="progressPercent">0%</strong>
             </div>
@@ -273,8 +273,8 @@
 
           <section id="resultPanel" class="result-panel hidden" aria-live="polite" tabindex="-1">
             <div id="resultMark" class="result-mark success"><span class="icon" data-icon="check"></span></div>
-            <h2 id="resultTitle">配置完成</h2>
-            <p id="resultText">ChatGPT、Codex 配置和 Router 已全部通过检查。</p>
+            <h2 id="resultTitle">设置完成</h2>
+            <p id="resultText">ChatGPT、Codex 设置和模型服务都已通过检查。</p>
             <div id="resultRecovery" class="result-recovery hidden" role="status">
               <span class="icon" data-icon="rotateCcw"></span>
               <span id="resultRecoveryText"></span>
@@ -294,7 +294,7 @@
           <div class="section-intro">
             <div>
               <h2>诊断信息</h2>
-              <p>用于现场确认环境或向技术支持提供脱敏结果。</p>
+              <p>用于自己排查问题，或发给技术支持（已隐去隐私信息）。</p>
             </div>
             <button id="runDiagnosticsButton" class="secondary-button" type="button"><span class="icon" data-icon="activity"></span><span>重新检查</span></button>
           </div>
@@ -315,9 +315,9 @@
           <div class="diagnostic-list">
             <div><span>操作系统</span><strong id="diagPlatform">检查中</strong></div>
             <div><span>ChatGPT</span><strong id="diagApp">检查中</strong></div>
-            <div><span>Codex 配置</span><strong id="diagConfig">检查中</strong></div>
-            <div><span>Router</span><strong id="diagRouter">检查中</strong></div>
-            <div><span>配置路径</span><code id="diagConfigPath">检查中</code></div>
+            <div><span>Codex 设置</span><strong id="diagConfig">检查中</strong></div>
+            <div><span>模型服务</span><strong id="diagRouter">检查中</strong></div>
+            <div><span>配置文件路径</span><code id="diagConfigPath">检查中</code></div>
             <div><span>外观模式</span><strong>浅色（当前版本）</strong></div>
           </div>
           <div class="diagnostic-actions">
@@ -339,7 +339,7 @@
             </div>
             <p id="assistantUpdateNotes" class="update-notes hidden"></p>
             <div class="update-panel-footer">
-              <span>只更新 Codex 助手，不会更新 ChatGPT 或修改 Router 配置。</span>
+              <span>只更新 Codex 助手，不会更新 ChatGPT，也不会改动模型服务设置。</span>
               <div>
                 <button id="checkAssistantUpdateButton" class="secondary-button" type="button" disabled>
                   <span class="icon" data-icon="refresh"></span><span>检查更新</span>
@@ -357,7 +357,7 @@
             <div class="lifecycle-panel-head">
               <div>
                 <h2 id="lifecycleTitle">应用与数据</h2>
-                <p>助手、Codex 配置、助手数据和 ChatGPT 相互独立。卸载助手默认保留其余三项。</p>
+                <p>助手、Codex 设置、助手数据和 ChatGPT 相互独立，卸载助手时默认保留其余三项。</p>
               </div>
               <span id="lifecycleState" class="status-badge pending">检查中</span>
             </div>
@@ -375,18 +375,18 @@
               <div class="lifecycle-row">
                 <span class="icon lifecycle-icon" data-icon="rotateCcw"></span>
                 <div>
-                  <h3>Codex 配置</h3>
-                  <p id="managedConfigDetail">正在检查助手管理的配置。</p>
+                  <h3>Codex 设置</h3>
+                  <p id="managedConfigDetail">正在检查助手管理的设置。</p>
                 </div>
                 <button id="restoreManagedConfigButton" class="secondary-button" type="button" disabled>
-                  <span class="icon" data-icon="rotateCcw"></span><span>恢复原配置</span>
+                  <span class="icon" data-icon="rotateCcw"></span><span>恢复原设置</span>
                 </button>
               </div>
               <div class="lifecycle-row">
                 <span class="icon lifecycle-icon" data-icon="shield"></span>
                 <div>
                   <h3>助手数据</h3>
-                  <p id="assistantDataDetail">正在检查本地状态、备份、主题和 Key。</p>
+                  <p id="assistantDataDetail">正在检查本机状态、备份、主题和密钥。</p>
                 </div>
                 <button id="deleteAssistantDataButton" class="secondary-button danger" type="button" disabled>
                   <span class="icon" data-icon="trash"></span><span>删除数据</span>
@@ -411,7 +411,7 @@
           <div class="section-intro">
             <div>
               <h2>ChatGPT 主题换肤</h2>
-              <p>切换工作界面或导入自己的背景，不影响 Router 与 Codex 配置。</p>
+              <p>切换工作界面或导入自己的背景，不影响模型服务和 Codex 设置。</p>
             </div>
             <span id="appearanceStatus" class="status-badge neutral">正在准备</span>
           </div>

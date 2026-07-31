@@ -99,7 +99,7 @@ pub fn plan_repair(
         Some(action(
             ACTION_RECHECK_OFFICIAL_APP,
             "重新检测官方应用",
-            "重新读取 Microsoft Store 或 macOS 签名证据；不会覆盖或卸载现有应用。",
+            "重新检查 Microsoft Store 或 macOS 的应用信息；不会覆盖或卸载现有应用。",
             false,
         ))
     } else if status.config.state == "rollback_failed" {
@@ -109,8 +109,8 @@ pub fn plan_repair(
     {
         Some(action(
             ACTION_CLEAR_APPEARANCE_SESSION,
-            "恢复官方外观状态",
-            "清除失效的非官方主题会话状态；不会修改 ChatGPT 安装文件或 Codex 配置。",
+            "恢复官方外观",
+            "清除失效的主题状态；不会修改 ChatGPT 安装文件或 Codex 设置。",
             true,
         ))
     } else if CONFIG_ERROR_CODES.contains(&error_code.as_str())
@@ -119,8 +119,8 @@ pub fn plan_repair(
     {
         Some(action(
             ACTION_RESTORE_CONFIGURATION,
-            "恢复上次完整配置",
-            "从校验通过的事务快照恢复助手管理的配置；执行前会再次建立可回退快照。",
+            "恢复上次的完整设置",
+            "从备份中恢复助手管理的设置；执行前会再次备份当前状态。",
             true,
         ))
     } else if status.config.present
@@ -133,8 +133,8 @@ pub fn plan_repair(
     {
         Some(action(
             ACTION_REVALIDATE_ROUTER,
-            "重新验证 Router",
-            "使用已保存的地址、模型和认证重新检查 /models 与 /responses，不会改写 Codex 配置。",
+            "重新检查模型服务",
+            "用已保存的地址、模型和密钥重新检查服务，不会改动 Codex 设置。",
             false,
         ))
     } else {
@@ -151,19 +151,19 @@ pub fn plan_repair(
         (
             "not_needed",
             "当前无需修复",
-            "ChatGPT、Router 和 Codex 配置均已通过检查。",
+            "ChatGPT、模型服务和 Codex 设置都已通过检查。",
         )
     } else if status.config.state == "rollback_failed" {
         (
             "manual_required",
             "自动恢复未完成",
-            "为避免覆盖可恢复证据，助手不会继续自动修改。请先导出诊断包。",
+            "为了避免覆盖备份，助手没有继续自动修改。请先导出诊断包。",
         )
     } else {
         (
             "manual_required",
             "需要人工确认",
-            "当前问题暂无安全的自动修复动作，请导出诊断包或返回配置页处理。",
+            "当前问题暂无安全的自动修复动作，请导出诊断包，或返回设置页处理。",
         )
     };
 
