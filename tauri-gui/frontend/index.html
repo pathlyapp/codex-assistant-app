@@ -46,10 +46,10 @@
             <p id="pageSubtitle">查看 ChatGPT 与模型服务是否就绪</p>
           </div>
           <div class="topbar-actions">
-            <button id="applyAppearanceButton" class="primary-button hidden" type="button">应用并重启 ChatGPT</button>
-            <button id="refreshButton" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
-              <span class="icon" data-icon="refresh"></span>
+            <button id="applyButton" class="primary-button hidden" type="submit" form="routerForm" disabled>
+              <span>保存并验证</span><span class="icon" data-icon="arrowRight"></span>
             </button>
+            <button id="applyAppearanceButton" class="primary-button hidden" type="button">应用并重启 ChatGPT</button>
           </div>
         </header>
 
@@ -135,41 +135,18 @@
 
         <section id="setupView" class="view" data-view-panel="setup">
           <div id="setupStepper" class="compact-stepper" role="list" aria-label="设置步骤">
-            <span class="active" data-guided-step="environment" role="listitem" aria-current="step"><b>1</b><em>环境检测</em></span>
+            <span class="active" data-guided-step="service" role="listitem" aria-current="step" tabindex="0" title="点击查看此步骤"><b>1</b><em>连接服务</em></span>
             <i aria-hidden="true"></i>
-            <span data-guided-step="app" role="listitem"><b>2</b><em>安装或修复</em></span>
-            <i aria-hidden="true"></i>
-            <span data-guided-step="service" role="listitem"><b>3</b><em>连接服务</em></span>
-            <i aria-hidden="true"></i>
-            <span data-guided-step="verify" role="listitem"><b>4</b><em>验证完成</em></span>
+            <span data-guided-step="verify" role="listitem" tabindex="0" title="点击查看此步骤"><b>2</b><em>验证完成</em></span>
+          </div>
+
+          <div id="setupAppNotice" class="banner warning setup-app-notice hidden" role="status">
+            <span class="icon" data-icon="alert"></span>
+            <span>尚未安装 ChatGPT 官方应用。可以先配置模型服务，点击“保存并验证”时会通过 Microsoft Store 自动安装；也可以返回首页手动安装。</span>
           </div>
 
           <div id="setupFormPanel">
-            <section class="setup-prerequisites" aria-label="准备状态">
-              <div class="prerequisite-row">
-                <span class="prerequisite-icon"><span class="icon" data-icon="cpu"></span></span>
-                <span class="prerequisite-copy">
-                  <strong>运行环境</strong>
-                  <small id="setupEnvironmentDetail">正在读取系统与架构信息</small>
-                </span>
-                <span id="setupEnvironmentState" class="status-badge pending">检查中</span>
-              </div>
-              <div class="prerequisite-row">
-                <span class="prerequisite-icon"><span class="icon" data-icon="appWindow"></span></span>
-                <span class="prerequisite-copy">
-                  <strong>ChatGPT 官方应用</strong>
-                  <small id="setupAppDetail">正在检查安装状态</small>
-                </span>
-                <span class="prerequisite-side">
-                  <span id="setupAppState" class="status-badge pending">检查中</span>
-                  <button id="setupInstallButton" class="secondary-button prerequisite-action hidden" type="button">
-                    <span class="icon" data-icon="download"></span><span>安装</span>
-                  </button>
-                </span>
-              </div>
-            </section>
-
-            <form id="routerForm" class="router-form">
+            <form id="routerForm" class="router-form" data-step-pane="service">
               <section class="form-section">
                 <div class="section-heading">
                   <div>
@@ -177,46 +154,37 @@
                     <h2>连接你的模型服务</h2>
                     <p>填写服务提供方给你的接口地址，助手会自动补全所需路径。</p>
                   </div>
-                  <button id="ollamaPresetButton" type="button" class="text-button" data-preset="ollama">
-                    填写本机 Ollama 地址
-                  </button>
                 </div>
 
                 <label class="field full-field" for="gatewayInput">
                   <span>服务地址</span>
-                  <div class="input-action-row">
-                    <span class="input-shell"><span class="icon" data-icon="link"></span><input id="gatewayInput" value="http://127.0.0.1:11434/v1" autocomplete="url" spellcheck="false" /></span>
-                    <button id="testRouterButton" class="secondary-button" type="button">
-                      <span class="icon" data-icon="plug"></span><span>测试连接</span>
-                    </button>
-                  </div>
-                  <small id="gatewayHelp">以 http:// 或 https:// 开头的完整地址，服务需兼容 OpenAI 接口。</small>
+                  <span class="input-shell"><span class="icon" data-icon="link"></span><input id="gatewayInput" placeholder="https://api.example.com/v1" autocomplete="url" spellcheck="false" /></span>
                 </label>
 
                 <div class="auth-row">
                   <div class="field-group">
                     <div class="field-label-row">
                       <label for="keyInput">访问密钥</label>
-                      <label class="switch-control">
-                        <input id="noAuthInput" type="checkbox" checked />
-                        <span class="switch-track"></span>
-                        <span>该服务不需要密钥</span>
-                      </label>
                     </div>
-                    <div class="input-shell secret-input disabled" id="keyShell">
+                    <div class="input-shell">
                       <span class="icon" data-icon="key"></span>
-                      <input id="keyInput" type="password" autocomplete="off" disabled placeholder="无需填写" />
-                      <button id="toggleKeyButton" class="inline-icon-button" type="button" title="显示访问密钥" aria-label="显示访问密钥" disabled>
+                      <input id="keyInput" type="password" autocomplete="off" placeholder="输入访问密钥" />
+                      <button id="toggleKeyButton" class="inline-icon-button" type="button" title="显示访问密钥" aria-label="显示访问密钥">
                         <span class="icon" data-icon="eye"></span>
                       </button>
                     </div>
-                    <small id="keyHelp">密钥会用 Windows 系统加密保存在本机，不会写入 Codex 配置文件。</small>
                   </div>
                 </div>
 
-                <div id="connectionResult" class="connection-result neutral">
+                <div class="test-router-row">
+                  <button id="testRouterButton" class="secondary-button" type="button">
+                    <span class="icon" data-icon="plug"></span><span>测试连接</span>
+                  </button>
+                </div>
+
+                <div id="connectionResult" class="connection-result neutral hidden">
                   <span class="icon" data-icon="info"></span>
-                  <span>填好地址后，点击“测试连接”。</span>
+                  <span></span>
                 </div>
               </section>
 
@@ -240,14 +208,24 @@
                   <small>Codex 会默认使用这个模型。</small>
                 </label>
               </section>
-
-              <div class="form-footer">
-                <div class="official-note"><span class="icon" data-icon="shieldCheck"></span><span>如果没装 ChatGPT，助手只会通过 Microsoft Store 官方渠道安装。设置完成前不会打开 ChatGPT。</span></div>
-                <button id="applyButton" class="primary-button" type="submit" disabled>
-                  <span>保存并验证</span><span class="icon" data-icon="arrowRight"></span>
-                </button>
-              </div>
             </form>
+
+            <section id="verifyStepPane" class="verify-step-pane hidden" data-step-pane="verify" aria-label="验证完成说明">
+              <div class="section-heading">
+                <div>
+                  <span class="section-kicker">验证完成</span>
+                  <h2>保存并验证全部设置</h2>
+                  <p>连接服务并选择默认模型后，点击“保存并验证”。助手会写入 Codex 设置、发送一次测试请求，并再次检查 ChatGPT 与模型服务。</p>
+                </div>
+              </div>
+              <dl class="verify-step-summary">
+                <div><dt>模型服务</dt><dd id="verifySummaryGateway">未设置</dd></div>
+                <div><dt>默认模型</dt><dd id="verifySummaryModel">未选择</dd></div>
+              </dl>
+              <button id="gotoServiceStepButton" class="secondary-button" type="button">
+                <span class="icon" data-icon="route"></span><span>前往连接服务</span>
+              </button>
+            </section>
           </div>
 
           <section id="progressPanel" class="progress-panel hidden" aria-live="polite">

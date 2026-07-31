@@ -41,7 +41,7 @@ const TASKS = [
   { id: "verify", label: "最终检查", waiting: "再次检查应用、设置和模型服务" },
 ];
 
-const GUIDED_STEPS = ["environment", "app", "service", "verify"];
+const GUIDED_STEPS = ["service", "verify"];
 const LIFECYCLE_ACTIONS = {
   uninstall_assistant: {
     title: "卸载 Codex 助手？",
@@ -69,8 +69,8 @@ const LIFECYCLE_ACTIONS = {
   },
 };
 const STAGE_GUIDED_STEP = {
-  preflight: "environment",
-  install_chatgpt: "app",
+  preflight: "service",
+  install_chatgpt: "service",
   validate_router: "service",
   validate_router_response: "service",
   configure_codex: "service",
@@ -114,6 +114,7 @@ const state = {
   galleryError: "",
   confirmResolver: null,
   confirmReturnFocus: null,
+  lastAutoRefresh: 0,
   lastResultPayload: null,
   lastErrorEnvelope: null,
   repairPlan: null,
@@ -148,18 +149,31 @@ function init() {
 
 function bindUi() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
-  $("#refreshButton").addEventListener("click", () => refreshStatus());
+  $$("[data-guided-step]").forEach((item) => {
+    item.addEventListener("click", () => selectGuidedStep(item.dataset.guidedStep));
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectGuidedStep(item.dataset.guidedStep);
+      }
+    });
+  });
+  $("#gotoServiceStepButton").addEventListener("click", () => setGuidedStep("service"));
+  window.addEventListener("focus", () => {
+    const now = Date.now();
+    if (now - state.lastAutoRefresh < 10000) return;
+    state.lastAutoRefresh = now;
+    refreshStatus();
+  });
   $("#runDiagnosticsButton").addEventListener("click", () => refreshStatus());
   $("#overviewAction").addEventListener("click", onOverviewAction);
   $("#appInstallButton").addEventListener("click", installChatGPT);
-  $("#setupInstallButton").addEventListener("click", () => installChatGPT({ continueToSetup: true }));
   $("#editConfigButton").addEventListener("click", () => navigate("setup"));
   $("#restoreConfigButton").addEventListener("click", restoreConfiguration);
   $("#disconnectRouterButton").addEventListener("click", disconnectRouter);
   $("#repairActionButton").addEventListener("click", runRecommendedRepair);
   $("#routerForm").addEventListener("submit", applyConfiguration);
   $("#testRouterButton").addEventListener("click", () => testRouter({ announce: true }));
-  $("#noAuthInput").addEventListener("change", updateAuthFields);
   $("#toggleKeyButton").addEventListener("click", toggleKeyVisibility);
   $("#gatewayInput").addEventListener("input", markFormChanged);
   $("#keyInput").addEventListener("input", markFormChanged);
@@ -168,7 +182,6 @@ function bindUi() {
     $("#applyButton").disabled = !$("#modelInput").value;
     setFormStep("apply");
   });
-  $$("[data-preset]").forEach((button) => button.addEventListener("click", () => applyPreset(button.dataset.preset)));
   $("#launchButton").addEventListener("click", restartChatGPT);
   $("#resultBackButton").addEventListener("click", showSetupForm);
   $("#resultDiagnosticButton").addEventListener("click", copyDiagnostics);
@@ -235,7 +248,7 @@ function navigate(view) {
     loadPresetThemes();
     loadGalleryThemes();
   }
-  if (view === "setup") renderSetupPrerequisites(state.status);
+  if (view === "setup") renderSetupGate(state.status);
   if (view === "diagnostics" && state.status) {
     refreshRepairPlan();
     refreshLifecycleStatus();
@@ -245,9 +258,6 @@ function navigate(view) {
 
 async function refreshStatus({ hydrateForm = false } = {}) {
   if (!tauri?.core || state.running || state.installingApp || state.lifecycleRunning) return;
-  const button = $("#refreshButton");
-  button.disabled = true;
-  button.classList.add("spinning");
   if (!state.status) setReadiness("loading", "正在检查本机状态", "正在检查 ChatGPT、Codex 设置和模型服务。", "请稍候");
   try {
     const status = normalizeSystemStatus(await tauri.core.invoke("get_system_status"));
@@ -261,9 +271,6 @@ async function refreshStatus({ hydrateForm = false } = {}) {
     $("#overviewAction").disabled = false;
     renderStatusError(error);
     renderRepairPlanError(error);
-  } finally {
-    button.disabled = false;
-    button.classList.remove("spinning");
   }
 }
 
@@ -333,7 +340,7 @@ function renderSystemStatus(status) {
   $("#diagConfig").textContent = status.configPresent ? `有效 · ${status.configuredModel}` : "未设置";
   $("#diagRouter").textContent = `${status.routerReachable ? "正常" : "异常"} · ${status.routerDetail}`;
   $("#diagConfigPath").textContent = status.configPath;
-  renderSetupPrerequisites(status);
+  renderSetupGate(status);
 }
 
 function setReadiness(kind, title, detail, action) {
@@ -360,46 +367,12 @@ function renderStatusError(error) {
   $("#appInstallButton").classList.add("hidden");
   $("#overallStatusBadge").textContent = "检查失败";
   $("#overallStatusBadge").className = "status-badge error";
-  $("#setupEnvironmentDetail").textContent = friendlyError(error);
-  setBadge($("#setupEnvironmentState"), "检查失败", "error");
-  $("#setupAppDetail").textContent = "等待环境检测完成";
-  setBadge($("#setupAppState"), "等待", "neutral");
-  $("#setupInstallButton").classList.add("hidden");
-  setGuidedStep("environment", { failed: true });
 }
 
-function renderSetupPrerequisites(status) {
-  if (!status) {
-    $("#setupEnvironmentDetail").textContent = "正在读取系统与架构信息";
-    setBadge($("#setupEnvironmentState"), "检查中", "pending");
-    $("#setupAppDetail").textContent = "正在检查安装状态";
-    setBadge($("#setupAppState"), "检查中", "pending");
-    $("#setupInstallButton").classList.add("hidden");
-    setGuidedStep("environment");
-    return;
-  }
-
-  $("#setupEnvironmentDetail").textContent = `${status.platform} · ${formatArchitecture(status.architecture)}`;
-  setBadge($("#setupEnvironmentState"), "可用", "success");
-  const appNeedsRepair = status.appState === "needs_repair";
-  $("#setupAppDetail").textContent = status.appInstalled
-    ? status.appDetail
-    : appNeedsRepair
-      ? status.appDetail
-      : "未检测到 ChatGPT 官方应用";
-  setBadge(
-    $("#setupAppState"),
-    status.appInstalled ? "已安装" : appNeedsRepair ? "需修复" : "待安装",
-    status.appInstalled ? "success" : appNeedsRepair ? "error" : "warning",
-  );
-  $("#setupInstallButton").classList.toggle(
-    "hidden",
-    status.appInstalled || status.platform !== "Windows" || appNeedsRepair,
-  );
-
-  if (!status.appInstalled) {
-    setGuidedStep("app");
-  } else if (!state.running && $("#resultPanel").classList.contains("hidden")) {
+function renderSetupGate(status) {
+  const appMissing = Boolean(status) && !status.appInstalled;
+  $("#setupAppNotice").classList.toggle("hidden", !appMissing);
+  if (!state.running && $("#resultPanel").classList.contains("hidden")) {
     setGuidedStep("service");
   }
 }
@@ -410,9 +383,7 @@ function setBadge(element, label, kind) {
 }
 
 function hydrateRouterForm(status) {
-  $("#gatewayInput").value = status.configuredGateway || "http://127.0.0.1:11434/v1";
-  const noAuth = status.configPresent ? !status.keyConfigured : true;
-  $("#noAuthInput").checked = noAuth;
+  $("#gatewayInput").value = status.configuredGateway || "";
   $("#keyInput").value = "";
   updateAuthFields();
   populateModels(status.configuredModel ? [status.configuredModel] : [], status.configuredModel || "");
@@ -565,38 +536,10 @@ async function runRecommendedRepair() {
   }
 }
 
-function applyPreset(preset) {
-  if (preset === "ollama") {
-    $("#gatewayInput").value = "http://127.0.0.1:11434/v1";
-    $("#noAuthInput").checked = true;
-    const windowsArm = state.status?.platform === "Windows" && ["aarch64", "arm64"].includes(state.status?.architecture);
-    $("#gatewayHelp").textContent = windowsArm
-      ? "当前是 Windows ARM64。127.0.0.1 只指向此 VM；宿主机 Ollama 请填写宿主机可访问地址。"
-      : "仅填写 Ollama 默认地址，不会自动安装或启动 Ollama。";
-  }
-  updateAuthFields();
-  markFormChanged();
-  if (preset === "ollama") {
-    const windowsArm = state.status?.platform === "Windows" && ["aarch64", "arm64"].includes(state.status?.architecture);
-    setConnectionResult(
-      "neutral",
-      windowsArm
-        ? "请确认 Windows 内已有 Ollama，或改填 macOS 宿主机地址后再测试。"
-        : "请确认 Ollama 已安装、正在运行且至少下载了一个模型。",
-    );
-  }
-}
-
 function updateAuthFields() {
-  const noAuth = $("#noAuthInput").checked;
-  $("#keyInput").disabled = noAuth;
-  $("#toggleKeyButton").disabled = noAuth;
-  $("#keyShell").classList.toggle("disabled", noAuth);
-  $("#keyInput").placeholder = noAuth
-    ? "Ollama 默认无需填写"
-    : state.status?.keyConfigured
-      ? "已加密保存；留空保持不变"
-      : "输入访问密钥";
+  $("#keyInput").placeholder = state.status?.keyConfigured
+    ? "已加密保存；留空保持不变"
+    : "服务没有密钥可留空";
   state.formDirty = true;
   invalidateConnectionTest();
 }
@@ -624,25 +567,18 @@ function invalidateConnectionTest() {
 }
 
 function authFingerprint() {
-  if ($("#noAuthInput").checked) return "no-auth";
   if ($("#keyInput").value.trim()) return "new-key";
-  return state.status?.keyConfigured ? "saved-key" : "missing-key";
+  return state.status?.keyConfigured ? "saved-key" : "no-auth";
 }
 
 async function testRouter({ announce = false } = {}) {
   if (!tauri?.core || state.running) return false;
   const gateway = $("#gatewayInput").value.trim();
-  const noAuth = $("#noAuthInput").checked;
-  const key = noAuth ? "" : $("#keyInput").value.trim();
-  const useSavedKey = !noAuth && !key && Boolean(state.status?.keyConfigured) && gateway === state.status?.configuredGateway;
+  const key = $("#keyInput").value.trim();
+  const useSavedKey = !key && Boolean(state.status?.keyConfigured) && gateway === state.status?.configuredGateway;
   if (!gateway) {
     setConnectionResult("error", "请填写服务地址。");
     $("#gatewayInput").focus();
-    return false;
-  }
-  if (!noAuth && !key && !useSavedKey) {
-    setConnectionResult("error", "请填写访问密钥，或勾选“该服务不需要密钥”。");
-    $("#keyInput").focus();
     return false;
   }
   const button = $("#testRouterButton");
@@ -689,6 +625,7 @@ async function testRouter({ announce = false } = {}) {
 function setConnectionResult(kind, message) {
   const result = $("#connectionResult");
   result.className = `connection-result ${kind}`;
+  result.classList.toggle("hidden", kind === "neutral");
   result.querySelector(".icon").innerHTML = kind === "success" ? ICONS.check : kind === "error" ? ICONS.alert : kind === "testing" ? ICONS.loader : ICONS.info;
   result.querySelector("span:last-child").textContent = message;
 }
@@ -723,6 +660,28 @@ function setFormStep(step) {
   setGuidedStep(["connect", "model", "apply"].includes(step) ? "service" : step);
 }
 
+function selectGuidedStep(step) {
+  if (state.running || state.installingApp) return;
+  if (!$("#resultPanel").classList.contains("hidden")) {
+    if (step === "verify") return;
+    showSetupForm();
+  } else {
+    $("#progressPanel").classList.add("hidden");
+    $("#setupFormPanel").classList.remove("hidden");
+  }
+  setGuidedStep(step);
+}
+
+function showStepPane(step) {
+  $$("#setupFormPanel [data-step-pane]").forEach((pane) => {
+    pane.classList.toggle("hidden", pane.dataset.stepPane !== step);
+  });
+  if (step === "verify") {
+    $("#verifySummaryGateway").textContent = $("#gatewayInput").value.trim() || "未设置";
+    $("#verifySummaryModel").textContent = $("#modelInput").value || "未选择";
+  }
+}
+
 function setGuidedStep(step, { failed = false, completed = false } = {}) {
   const currentIndex = Math.max(0, GUIDED_STEPS.indexOf(step));
   $$("[data-guided-step]").forEach((item, index) => {
@@ -737,12 +696,11 @@ function setGuidedStep(step, { failed = false, completed = false } = {}) {
       item.removeAttribute("aria-current");
     }
   });
+  showStepPane(GUIDED_STEPS[currentIndex]);
 }
 
 function guidedStepCompleted(step) {
   const stageDone = (stage) => ["complete", "skipped", "restored"].includes(state.tasks[stage]);
-  if (step === "environment") return Boolean(state.status) || stageDone("preflight");
-  if (step === "app") return Boolean(state.status?.appInstalled) || stageDone("install_chatgpt");
   if (step === "service") {
     return stageDone("validate_router")
       && stageDone("validate_router_response")
@@ -769,15 +727,18 @@ async function applyConfiguration(event) {
   $("#logOutput").textContent = "";
   $("#logCount").textContent = "0 行";
   renderTasks();
-  setGuidedStep("environment");
+  setGuidedStep("service");
   showProgressPanel();
   setUiRunning(true);
   appendLog("Codex Assistant setup started\n");
+  const gateway = $("#gatewayInput").value.trim();
+  const key = $("#keyInput").value.trim();
+  const useSavedKey = !key && Boolean(state.status?.keyConfigured) && gateway === state.status?.configuredGateway;
   const options = {
-    gateway: $("#gatewayInput").value.trim(),
+    gateway,
     model: $("#modelInput").value,
-    key: $("#noAuthInput").checked ? "" : $("#keyInput").value.trim(),
-    noAuth: $("#noAuthInput").checked,
+    key,
+    noAuth: !key && !useSavedKey,
     installChatgpt: true,
   };
   try {
@@ -875,6 +836,7 @@ function showResult(payload) {
   $("#setupFormPanel").classList.add("hidden");
   $("#progressPanel").classList.add("hidden");
   $("#resultPanel").classList.remove("hidden");
+  updateTopbarActions();
   const success = Boolean(payload.success);
   const mark = $("#resultMark");
   mark.className = `result-mark ${success ? "success" : "error"}`;
@@ -889,7 +851,7 @@ function showResult(payload) {
   $("#progressLog").open = !success;
   const failedStage = (payload.stages || []).find((stage) => stage.stage === "rollback" && stage.status === "failed")
     || (payload.stages || []).find((stage) => stage.status === "failed");
-  setGuidedStep(success ? "verify" : STAGE_GUIDED_STEP[failedStage?.stage] || "environment", {
+  setGuidedStep(success ? "verify" : STAGE_GUIDED_STEP[failedStage?.stage] || "service", {
     failed: !success,
     completed: success,
   });
@@ -968,20 +930,27 @@ function showProgressPanel() {
   $("#setupFormPanel").classList.add("hidden");
   $("#resultPanel").classList.add("hidden");
   $("#progressPanel").classList.remove("hidden");
+  updateTopbarActions();
 }
 
 function showSetupForm() {
   $("#progressPanel").classList.add("hidden");
   $("#resultPanel").classList.add("hidden");
   $("#setupFormPanel").classList.remove("hidden");
-  renderSetupPrerequisites(state.status);
+  renderSetupGate(state.status);
   navigate("setup");
+  updateTopbarActions();
 }
 
 function updateTopbarActions() {
   const onAppearance = state.currentView === "appearance";
-  $("#refreshButton").classList.toggle("hidden", onAppearance || state.running);
+  const onSetup = state.currentView === "setup";
+  const setupFormVisible = onSetup
+    && !state.running
+    && $("#progressPanel").classList.contains("hidden")
+    && $("#resultPanel").classList.contains("hidden");
   $("#applyAppearanceButton").classList.toggle("hidden", !onAppearance);
+  $("#applyButton").classList.toggle("hidden", !setupFormVisible);
 }
 
 function setUiRunning(running) {
@@ -1018,9 +987,6 @@ async function installChatGPT({ continueToSetup = false } = {}) {
   } catch (error) {
     installationFailed = true;
     setStatusCard("app", false, "ChatGPT 安装未完成", friendlyError(error));
-    $("#setupAppDetail").textContent = friendlyError(error);
-    setBadge($("#setupAppState"), "未完成", "error");
-    setGuidedStep("app", { failed: true });
     if (continueToSetup) {
       setReadiness("attention", "还需要完成设置", "ChatGPT 安装未完成，可点击重试安装。", "安装并设置");
     }
@@ -1028,30 +994,24 @@ async function installChatGPT({ continueToSetup = false } = {}) {
   } finally {
     state.installingApp = false;
     renderAppInstallState();
-    if (!installationFailed) renderSetupPrerequisites(state.status);
+    if (!installationFailed) renderSetupGate(state.status);
     $("#overviewAction").disabled = false;
   }
 }
 
 function renderAppInstallState() {
   const installing = state.installingApp;
-  const buttons = [$("#appInstallButton"), $("#setupInstallButton")];
-  buttons.forEach((button) => {
-    button.disabled = installing;
-    button.querySelector(".icon").innerHTML = installing ? ICONS.loader : ICONS.download;
-    button.querySelector(".icon").classList.toggle("spin", installing);
-  });
-  $("#appInstallButton").querySelector("span:last-child").textContent = installing ? "正在安装…" : "下载安装";
-  $("#setupInstallButton").querySelector("span:last-child").textContent = installing ? "安装中…" : "安装";
+  const button = $("#appInstallButton");
+  button.disabled = installing;
+  button.querySelector(".icon").innerHTML = installing ? ICONS.loader : ICONS.download;
+  button.querySelector(".icon").classList.toggle("spin", installing);
+  button.querySelector("span:last-child").textContent = installing ? "正在安装…" : "下载安装";
   if (installing) {
     $("#appStatusTitle").textContent = "正在下载并安装 ChatGPT";
     $("#appStatusDetail").textContent = "正在调用 Microsoft Store 官方渠道，请留意系统确认窗口。";
     const badge = $("#appStatusBadge");
     badge.textContent = "安装中";
     badge.className = "status-badge pending";
-    $("#setupAppDetail").textContent = "正在调用 Microsoft Store 官方渠道";
-    setBadge($("#setupAppState"), "安装中", "pending");
-    setGuidedStep("app");
   }
 }
 
