@@ -47,17 +47,18 @@ jobs:
           cache: npm
           cache-dependency-path: tauri-gui/package-lock.json
       # Windows job 不使用 dtolnay/rust-toolchain：该 action 内部依赖 bash，
-      # 而 self-hosted runner 上 bash 会解析到 WSL 导致失败（与 deeppath 保持一致，
-      # Windows 步骤全程只用 pwsh）。这里直接使用 runner 预装的 Rust。
+      # 而 self-hosted runner 上 bash 会解析到 WSL 导致失败。Windows 步骤统一使用
+      # 系统自带的 Windows PowerShell（self-hosted runner 未安装 pwsh）。
       - name: Install Rust toolchain (macOS)
         if: matrix.platform == 'macos'
         uses: dtolnay/rust-toolchain@stable
       - name: Configure Rust toolchain (Windows)
         if: matrix.platform == 'windows'
-        shell: pwsh
+        shell: powershell
         run: |
           $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
-          echo "$env:USERPROFILE\.cargo\bin" >> $env:GITHUB_PATH
+          # Windows PowerShell 的 >> 会写出 UTF-16，GITHUB_PATH 必须是 UTF-8。
+          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           rustup target add ${{ matrix.rust_target }}
           rustc -vV
       - uses: Swatinem/rust-cache@v2
@@ -99,7 +100,7 @@ jobs:
 
       - name: Build signed NSIS installer (Windows)
         if: matrix.platform == 'windows'
-        shell: pwsh
+        shell: powershell
         env:
           WIN_SIGN_PIN: ${{ secrets.WIN_SIGN_PIN }}
         run: tools/windows-build.ps1 -Architecture ${{ matrix.arch }} -Sign -SkipNpmInstall
