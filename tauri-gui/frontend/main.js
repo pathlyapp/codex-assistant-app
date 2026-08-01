@@ -42,6 +42,13 @@ const TASKS = [
 ];
 
 const GUIDED_STEPS = ["service", "verify"];
+const MODALITY_LABELS = {
+  text: "文本",
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+  file: "文件",
+};
 const LIFECYCLE_ACTIONS = {
   uninstall_assistant: {
     title: "卸载 Codex 助手？",
@@ -96,6 +103,7 @@ const state = {
   tasks: {},
   messages: {},
   models: [],
+  modelModalities: {},
   testedGateway: "",
   testedWithKeyState: "",
   formDirty: false,
@@ -180,6 +188,7 @@ function bindUi() {
   $("#modelInput").addEventListener("change", () => {
     state.formDirty = true;
     $("#applyButton").disabled = !$("#modelInput").value;
+    updateModelModalityHint();
     setFormStep("apply");
   });
   $("#launchButton").addEventListener("click", restartChatGPT);
@@ -386,6 +395,7 @@ function hydrateRouterForm(status) {
   $("#gatewayInput").value = status.configuredGateway || "";
   $("#keyInput").value = "";
   updateAuthFields();
+  state.modelModalities = {};
   populateModels(status.configuredModel ? [status.configuredModel] : [], status.configuredModel || "");
   state.testedGateway = status.routerReachable ? status.configuredGateway || "" : "";
   state.testedWithKeyState = status.routerReachable ? authFingerprint() : "";
@@ -592,6 +602,7 @@ async function testRouter({ announce = false } = {}) {
       request: { gateway, key, useSavedKey },
     });
     state.models = response.models || [];
+    state.modelModalities = response.modelInputModalities || {};
     state.testedGateway = response.gateway;
     state.testedWithKeyState = authFingerprint();
     $("#gatewayInput").value = response.gateway;
@@ -603,6 +614,7 @@ async function testRouter({ announce = false } = {}) {
     return true;
   } catch (error) {
     state.models = [];
+    state.modelModalities = {};
     state.testedGateway = "";
     state.testedWithKeyState = "";
     populateModels([], "");
@@ -636,11 +648,39 @@ function populateModels(models, selected) {
   if (!models.length) {
     select.add(new Option("测试连接后可选", ""));
     select.disabled = true;
+    updateModelModalityHint();
     return;
   }
-  models.forEach((model) => select.add(new Option(model, model)));
+  models.forEach((model) => select.add(new Option(modelOptionLabel(model), model)));
   select.value = models.includes(selected) ? selected : models[0];
   select.disabled = false;
+  updateModelModalityHint();
+}
+
+function modalityLabels(model) {
+  return (state.modelModalities[model] || []).map((modality) => MODALITY_LABELS[modality] || modality);
+}
+
+function modelOptionLabel(model) {
+  const extras = modalityLabels(model).filter((label) => label !== MODALITY_LABELS.text);
+  return extras.length ? `${model}（支持${extras.join("、")}）` : model;
+}
+
+function updateModelModalityHint() {
+  const hint = $("#modelModalityHint");
+  const model = $("#modelInput").value;
+  const modalities = model ? state.modelModalities[model] : null;
+  if (!modalities?.length) {
+    hint.textContent = "";
+    hint.classList.add("hidden");
+    return;
+  }
+  const supportsImage = modalities.includes("image");
+  hint.textContent = supportsImage
+    ? `该模型支持输入：${modalityLabels(model).join("、")}。`
+    : `该模型仅支持输入：${modalityLabels(model).join("、")}，无法识别图片。`;
+  hint.classList.toggle("warning-text", !supportsImage);
+  hint.classList.remove("hidden");
 }
 
 function setModelReady(ready, count = 0) {
@@ -678,7 +718,8 @@ function showStepPane(step) {
   });
   if (step === "verify") {
     $("#verifySummaryGateway").textContent = $("#gatewayInput").value.trim() || "未设置";
-    $("#verifySummaryModel").textContent = $("#modelInput").value || "未选择";
+    const model = $("#modelInput").value;
+    $("#verifySummaryModel").textContent = model ? modelOptionLabel(model) : "未选择";
   }
 }
 

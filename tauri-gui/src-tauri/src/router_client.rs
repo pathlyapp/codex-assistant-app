@@ -14,6 +14,14 @@ const PROBE_MAX_OUTPUT_TOKENS: u16 = 16;
 const MODELS_TIMEOUT: Duration = Duration::from_secs(12);
 const RESPONSES_TIMEOUT: Duration = Duration::from_secs(90);
 
+#[derive(Clone, Debug)]
+pub struct ModelEntry {
+    pub id: String,
+    /// OpenRouter 等服务在 /models 里声明的输入模态（如 text、image、video）。
+    /// 服务未提供该信息时为 None。
+    pub input_modalities: Option<Vec<String>>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResponsesProbeResult {
@@ -43,6 +51,14 @@ impl RouterClient {
     }
 
     pub fn fetch_models(&self) -> Result<Vec<String>, String> {
+        Ok(self
+            .fetch_model_entries()?
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect())
+    }
+
+    pub fn fetch_model_entries(&self) -> Result<Vec<ModelEntry>, String> {
         let endpoint = self.endpoint("models");
         let mut request = self
             .agent
@@ -107,7 +123,7 @@ fn probe_request(model: &str) -> Value {
     })
 }
 
-fn parse_models_response(body: &[u8], gateway: &str) -> Result<Vec<String>, String> {
+fn parse_models_response(body: &[u8], gateway: &str) -> Result<Vec<ModelEntry>, String> {
     let payload: Value =
         serde_json::from_slice(body).map_err(|_| "/models 未返回有效 JSON".to_string())?;
     let mut models = payload
@@ -117,10 +133,7 @@ fn parse_models_response(body: &[u8], gateway: &str) -> Result<Vec<String>, Stri
             items
                 .iter()
                 .take(MAX_MODEL_COUNT + 1)
-                .filter_map(|item| item.get("id").and_then(Value::as_str))
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
+                .filter_map(parse_model_entry)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -129,8 +142,8 @@ fn parse_models_response(body: &[u8], gateway: &str) -> Result<Vec<String>, Stri
             "Router /models 返回超过 {MAX_MODEL_COUNT} 个模型，已停止处理"
         ));
     }
-    models.sort();
-    models.dedup();
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    models.dedup_by(|left, right| left.id == right.id);
     if models.is_empty() {
         if is_local_ollama_gateway(gateway) {
             return Err(
@@ -141,6 +154,31 @@ fn parse_models_response(body: &[u8], gateway: &str) -> Result<Vec<String>, Stri
         return Err("Router /models 没有返回可用模型".to_string());
     }
     Ok(models)
+}
+
+fn parse_model_entry(item: &Value) -> Option<ModelEntry> {
+    let id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let input_modalities = item
+        .get("architecture")
+        .and_then(|architecture| architecture.get("input_modalities"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|values| !values.is_empty());
+    Some(ModelEntry {
+        id: id.to_string(),
+        input_modalities,
+    })
 }
 
 fn read_limited(reader: impl Read, max_bytes: u64, endpoint: &str) -> Result<Vec<u8>, String> {
@@ -484,8 +522,35 @@ mod tests {
         });
         let body = serde_json::to_vec(&payload).unwrap();
         let models = parse_models_response(&body, "http://router.test/v1").unwrap();
-        assert_eq!(models, vec!["model-a", "model-b"]);
+        let ids = models.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["model-a", "model-b"]);
+        assert!(models.iter().all(|entry| entry.input_modalities.is_none()));
         assert!(parse_models_response(b"{\"data\":[]}", "http://router.test/v1").is_err());
+    }
+
+    #[test]
+    fn model_parser_extracts_input_modalities_when_declared() {
+        let payload = json!({
+            "data": [
+                {
+                    "id": "vision-model",
+                    "architecture": { "input_modalities": ["Text", "IMAGE", " "] }
+                },
+                {
+                    "id": "text-model",
+                    "architecture": { "input_modalities": [] }
+                }
+            ]
+        });
+        let body = serde_json::to_vec(&payload).unwrap();
+        let models = parse_models_response(&body, "http://router.test/v1").unwrap();
+        assert_eq!(models[0].id, "text-model");
+        assert!(models[0].input_modalities.is_none());
+        assert_eq!(models[1].id, "vision-model");
+        assert_eq!(
+            models[1].input_modalities.as_deref(),
+            Some(["text".to_string(), "image".to_string()].as_slice())
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     env, fs,
     net::TcpListener,
     path::{Path, PathBuf},
@@ -112,6 +113,8 @@ struct GatewayProbeRequest {
 struct ModelDiscovery {
     gateway: String,
     models: Vec<String>,
+    /// 服务声明了输入模态的模型 -> 模态列表（如 ["text", "image"]）。
+    model_input_modalities: BTreeMap<String, Vec<String>>,
     used_saved_key: bool,
     message: String,
 }
@@ -408,6 +411,9 @@ struct InstallState {
     wire_api: String,
     #[serde(default)]
     available_models: Vec<String>,
+    /// 服务声明了输入模态的模型 -> 模态列表（如 ["text", "image"]）。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    model_input_modalities: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     key_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -457,6 +463,7 @@ struct InstallContext {
     operation_id: String,
     options: SetupOptions,
     models: Vec<String>,
+    model_modalities: BTreeMap<String, Vec<String>>,
     responses_probe: Option<ResponsesProbeResult>,
     transaction: Option<ConfigTransaction>,
 }
@@ -953,11 +960,22 @@ fn discover_models_inner(request: GatewayProbeRequest) -> Result<ModelDiscovery,
     } else {
         None
     };
-    let models = fetch_models(&gateway, bearer.as_deref())?;
+    let entries = RouterClient::new(&gateway, bearer.as_deref()).fetch_model_entries()?;
+    let model_input_modalities = entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .input_modalities
+                .clone()
+                .map(|modalities| (entry.id.clone(), modalities))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let models = entries.into_iter().map(|entry| entry.id).collect::<Vec<_>>();
     Ok(ModelDiscovery {
         gateway,
         message: format!("连接成功，发现 {} 个模型", models.len()),
         models,
+        model_input_modalities,
         used_saved_key,
     })
 }
@@ -992,6 +1010,7 @@ fn run_setup(app: AppHandle, options: SetupOptions) -> InstallerFinished {
         operation_id: operation_id.clone(),
         options,
         models: Vec::new(),
+        model_modalities: BTreeMap::new(),
         responses_probe: None,
         transaction: None,
     };
@@ -1241,7 +1260,17 @@ fn install_chatgpt(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
 
 fn validate_router(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOutcome, String> {
     let bearer = setup_bearer(ctx)?;
-    let models = fetch_models(&ctx.options.gateway, bearer.as_deref())?;
+    let entries = RouterClient::new(&ctx.options.gateway, bearer.as_deref()).fetch_model_entries()?;
+    ctx.model_modalities = entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .input_modalities
+                .clone()
+                .map(|modalities| (entry.id.clone(), modalities))
+        })
+        .collect();
+    let models = entries.into_iter().map(|entry| entry.id).collect::<Vec<_>>();
     if ctx.options.model.is_empty() {
         ctx.options.model = models[0].clone();
     } else if !models.iter().any(|model| model == &ctx.options.model) {
@@ -1360,6 +1389,7 @@ fn configure_provider(app: &AppHandle, ctx: &mut InstallContext) -> Result<Stage
         token_mode: token.token_mode,
         wire_api: "responses".to_string(),
         available_models: ctx.models.clone(),
+        model_input_modalities: ctx.model_modalities.clone(),
         key_path: token
             .key_path
             .map(|path| path.to_string_lossy().to_string()),
@@ -3587,6 +3617,27 @@ fn token_helper_command(paths: &InstallerPaths) -> Result<TokenHelperCommand, St
     })
 }
 
+/// Codex 桌面端按目录里的 input_modalities 决定是否随请求发送图片；
+/// 声明为纯文本的模型，图片会被替换成占位文本。这里只透传运行时可识别的
+/// 模态。服务未声明模态信息时默认放行图片：很多服务商的 /models 元数据
+/// 不完善，宁可让不支持的模型在上游明确报错，也不要静默丢弃图片。
+const CATALOG_SAFE_MODALITIES: [&str; 3] = ["text", "image", "audio"];
+
+fn catalog_input_modalities(declared: Option<&Vec<String>>) -> Vec<String> {
+    let Some(declared) = declared else {
+        return vec!["text".to_string(), "image".to_string()];
+    };
+    let mut modalities = vec!["text".to_string()];
+    for modality in declared {
+        if CATALOG_SAFE_MODALITIES.contains(&modality.as_str())
+            && !modalities.iter().any(|existing| existing == modality)
+        {
+            modalities.push(modality.clone());
+        }
+    }
+    modalities
+}
+
 fn write_model_catalog(paths: &InstallerPaths, state: &InstallState) -> Result<PathBuf, String> {
     let path = paths.install_root.join("models.json");
     let models = state
@@ -3617,7 +3668,7 @@ fn write_model_catalog(paths: &InstallerPaths, state: &InstallState) -> Result<P
                 "truncation_policy": {"mode": "tokens", "limit": 10000},
                 "supports_parallel_tool_calls": true,
                 "experimental_supported_tools": [],
-                "input_modalities": ["text"]
+                "input_modalities": catalog_input_modalities(state.model_input_modalities.get(model)),
             })
         })
         .collect::<Vec<_>>();
@@ -3670,6 +3721,15 @@ fn write_codex_config(
 
     document["model"] = value(state.model.as_str());
     document["model_provider"] = value(state.provider_id.as_str());
+    // high/xhigh 会被部分网关翻译成超出模型上限的 thinking_budget 而直接报错，
+    // 保存设置时统一回落到 medium；用户主动设置的更低档位保持不变。
+    match document
+        .get("model_reasoning_effort")
+        .and_then(Item::as_str)
+    {
+        Some("none" | "minimal" | "low" | "medium") => {}
+        _ => document["model_reasoning_effort"] = value("medium"),
+    }
     if let Some(catalog) = &state.model_catalog_path {
         document["model_catalog_json"] = value(catalog.as_str());
     } else {
@@ -4282,6 +4342,27 @@ mod tests {
     }
 
     #[test]
+    fn catalog_modalities_respect_declaration_and_allow_image_when_unknown() {
+        assert_eq!(catalog_input_modalities(None), vec!["text", "image"]);
+        assert_eq!(
+            catalog_input_modalities(Some(&vec!["text".to_string()])),
+            vec!["text"]
+        );
+        assert_eq!(
+            catalog_input_modalities(Some(&vec![
+                "text".to_string(),
+                "image".to_string(),
+                "video".to_string(),
+            ])),
+            vec!["text", "image"]
+        );
+        assert_eq!(
+            catalog_input_modalities(Some(&vec!["image".to_string()])),
+            vec!["text", "image"]
+        );
+    }
+
+    #[test]
     fn configuration_snapshot_restores_all_managed_files() {
         let root = env::temp_dir().join(format!(
             "codex-assistant-backup-test-{}-{}",
@@ -4632,6 +4713,10 @@ model = "gpt-5"
             token_mode: "static".to_string(),
             wire_api: "responses".to_string(),
             available_models: vec!["llama3.1".to_string()],
+            model_input_modalities: BTreeMap::from([(
+                "llama3.1".to_string(),
+                vec!["text".to_string(), "image".to_string()],
+            )]),
             key_path: Some(root.join("router-key.secret").to_string_lossy().to_string()),
             secret_storage: Some(token_support::SECRET_STORAGE_DPAPI.to_string()),
             model_catalog_path: Some(root.join("models.json").to_string_lossy().to_string()),
@@ -4655,6 +4740,50 @@ model = "gpt-5"
         assert!(config.contains("[model_providers.codex_assistant_router.auth]"));
         assert!(config.contains("--codex-assistant-token-helper"));
         assert!(!config.contains("powershell.exe"));
+        assert!(config.contains("model_reasoning_effort = \"medium\""));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reasoning_effort_clamps_high_but_keeps_lower_levels() {
+        let root = env::temp_dir().join(format!(
+            "codex-assistant-effort-{}-{}",
+            std::process::id(),
+            unix_timestamp()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let state = InstallState {
+            version: VERSION.to_string(),
+            provider_id: PROVIDER_ID.to_string(),
+            provider_display_name: PROVIDER_NAME.to_string(),
+            model: "model-a".to_string(),
+            gateway_base_url: DEFAULT_GATEWAY.to_string(),
+            token_mode: "none".to_string(),
+            wire_api: "responses".to_string(),
+            available_models: vec!["model-a".to_string()],
+            model_input_modalities: BTreeMap::new(),
+            key_path: None,
+            secret_storage: None,
+            model_catalog_path: None,
+            responses_verified_at: Some(unix_timestamp()),
+            responses_protocol: Some("sse".to_string()),
+            transaction_id: Some("test-transaction".to_string()),
+            installed_at: unix_timestamp(),
+        };
+        let path = root.join("config.toml");
+
+        fs::write(&path, "model_reasoning_effort = \"high\"\n").unwrap();
+        write_codex_config(&path, &state, None).unwrap();
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("model_reasoning_effort = \"medium\""));
+
+        fs::write(&path, "model_reasoning_effort = \"low\"\n").unwrap();
+        write_codex_config(&path, &state, None).unwrap();
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("model_reasoning_effort = \"low\""));
+
         let _ = fs::remove_dir_all(root);
     }
 
@@ -4669,6 +4798,7 @@ model = "gpt-5"
             token_mode: "none".to_string(),
             wire_api: "responses".to_string(),
             available_models: vec!["model-a".to_string()],
+            model_input_modalities: BTreeMap::new(),
             key_path: None,
             secret_storage: None,
             model_catalog_path: None,

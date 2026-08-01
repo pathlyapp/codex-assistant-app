@@ -1048,6 +1048,14 @@ select:disabled {
   gap: 12px;
 }
 
+.modality-hint {
+  color: var(--success);
+}
+
+.modality-hint.warning-text {
+  color: var(--warning);
+}
+
 .connection-result {
   display: flex;
   min-height: 38px;
