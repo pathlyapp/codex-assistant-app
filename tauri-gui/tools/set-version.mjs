@@ -35,24 +35,26 @@ updateJson("src-tauri/tauri.conf.json", (value) => {
 
 const cargoPath = resolve(root, "src-tauri", "Cargo.toml");
 const cargo = readFileSync(cargoPath, "utf8");
-const updatedCargo = cargo.replace(
-  /(^\[package\][\s\S]*?^version = ")[^"]+(")/m,
-  `$1${version}$2`,
-);
-if (updatedCargo === cargo) {
+const cargoPattern = /(^\[package\][\s\S]*?^version = ")[^"]+(")/m;
+if (!cargoPattern.test(cargo)) {
   throw new Error("Cargo package version was not found");
 }
-writeFileSync(cargoPath, updatedCargo, "utf8");
+writeFileSync(cargoPath, cargo.replace(cargoPattern, `$1${version}$2`), "utf8");
 
 const frontendPath = resolve(root, "frontend", "index.html");
 const frontend = readFileSync(frontendPath, "utf8");
-const updatedFrontend = frontend
-  .replace(/(styles\.css\?v=)\d+\.\d+\.\d+/g, `$1${version}`)
-  .replace(/(main\.js\?v=)\d+\.\d+\.\d+/g, `$1${version}`)
-  .replace(/(Codex 助手 )\d+\.\d+\.\d+/g, `$1${version}`);
-if (updatedFrontend === frontend) {
+const frontendPatterns = [
+  /(styles\.css\?v=)\d+\.\d+\.\d+/g,
+  /(main\.js\?v=)\d+\.\d+\.\d+/g,
+  /(Codex 助手 )\d+\.\d+\.\d+/g,
+];
+if (frontendPatterns.some((pattern) => !frontend.match(pattern))) {
   throw new Error("Frontend version fields were not found");
 }
+const updatedFrontend = frontendPatterns.reduce(
+  (text, pattern) => text.replace(pattern, `$1${version}`),
+  frontend,
+);
 writeFileSync(frontendPath, updatedFrontend, "utf8");
 
 console.log(`Set Codex Assistant version to ${version} in ${root}`);
