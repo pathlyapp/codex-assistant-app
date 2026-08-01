@@ -53,9 +53,20 @@ jobs:
         if: matrix.platform == 'windows'
         shell: powershell
         run: |
-          $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+          $cargoBin = "$env:USERPROFILE\.cargo\bin"
+          # self-hosted runner 环境可能漂移（rustup 曾被清空导致发布失败）：
+          # 缺 rustup 时自动修复，RUSTUP_HOME 中已有的 toolchain 会被复用。
+          if (!(Test-Path (Join-Path $cargoBin "rustup.exe"))) {
+            Write-Host "rustup not found; repairing Rust toolchain"
+            $rustupInit = Join-Path $env:TEMP "rustup-init.exe"
+            Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -OutFile $rustupInit -UseBasicParsing
+            & $rustupInit -y --default-toolchain stable
+            if ($LASTEXITCODE -ne 0) { throw "rustup installation failed" }
+            Remove-Item $rustupInit -Force
+          }
+          $env:PATH = "$cargoBin;$env:PATH"
           # Windows PowerShell 的 >> 会写出 UTF-16，GITHUB_PATH 必须是 UTF-8。
-          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           rustup target add ${{ matrix.rust_target }}
           rustc -vV
       - uses: Swatinem/rust-cache@v2
