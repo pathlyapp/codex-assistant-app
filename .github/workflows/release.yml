@@ -95,6 +95,13 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: npm run build:mac:signed
 
+      # self-hosted runner 未预装 clang（ring 构建脚本需要）。该步骤幂等：
+      # 已存在 clang 时直接跳过，否则下载便携版 LLVM 并持久化到 runner 用户目录。
+      - name: Ensure LLVM/Clang (Windows)
+        if: matrix.platform == 'windows'
+        shell: powershell
+        run: tools/windows-ensure-llvm.ps1
+
       - name: Build signed NSIS installer (Windows)
         if: matrix.platform == 'windows'
         shell: powershell
