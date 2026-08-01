@@ -381,6 +381,11 @@ function renderStatusError(error) {
 function renderSetupGate(status) {
   const appMissing = Boolean(status) && !status.appInstalled;
   $("#setupAppNotice").classList.toggle("hidden", !appMissing);
+  if (appMissing) {
+    $("#setupAppNoticeText").textContent = status.platform === "Windows"
+      ? "尚未安装 ChatGPT 官方应用。可以先配置模型服务，点击“保存并验证”时会通过 Microsoft Store 自动安装；也可以返回首页手动安装。"
+      : "尚未安装 ChatGPT 官方应用。可以先配置模型服务，但“保存并验证”前需要先从 OpenAI 官方渠道安装 ChatGPT 桌面版。";
+  }
   if (!state.running && $("#resultPanel").classList.contains("hidden")) {
     setGuidedStep("service");
   }

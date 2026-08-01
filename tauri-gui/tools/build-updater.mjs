@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { detectDeveloperIdIdentity, loadSigningEnv } from "./signing-env.mjs";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const GENERATED_CONFIG = join(
   ROOT,
@@ -139,6 +141,23 @@ async function main() {
     );
   }
   buildEnvironment.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= "";
+
+  if (settings.platform === "mac" && !settings.mock) {
+    const signingEnvLoaded = await loadSigningEnv(buildEnvironment);
+    if (!buildEnvironment.APPLE_SIGNING_IDENTITY?.trim()) {
+      const detected = detectDeveloperIdIdentity();
+      if (detected) {
+        buildEnvironment.APPLE_SIGNING_IDENTITY = detected.hash;
+        console.log(`[signing] 自动检测到签名身份: ${detected.name}`);
+      }
+    }
+    if (buildEnvironment.APPLE_SIGNING_IDENTITY?.trim()) {
+      console.log("[signing] macOS 产物将使用 Developer ID 签名");
+    } else if (signingEnvLoaded) {
+      console.warn("[signing] 警告: 未找到签名身份，macOS 产物不会签名");
+    }
+  }
+
   await fs.mkdir(dirname(GENERATED_CONFIG), { recursive: true });
   await fs.writeFile(
     GENERATED_CONFIG,

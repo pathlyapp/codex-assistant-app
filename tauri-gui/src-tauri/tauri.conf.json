@@ -27,6 +27,24 @@
     "active": true,
     "useLocalToolsDir": true,
     "targets": "all",
+    "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": true,
+      "dmg": {
+        "windowSize": {
+          "width": 540,
+          "height": 380
+        },
+        "appPosition": {
+          "x": 140,
+          "y": 180
+        },
+        "applicationFolderPosition": {
+          "x": 400,
+          "y": 180
+        }
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

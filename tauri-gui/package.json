@@ -7,6 +7,8 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "build:mac": "tauri build --bundles app",
+    "build:mac:signed": "node tools/build-mac-signed.mjs",
+    "build:mac:dmg": "node tools/build-mac-signed.mjs --dmg",
     "build:windows": "tauri build --bundles nsis",
     "build:update:mac": "node tools/build-updater.mjs --platform mac",
     "build:update:windows": "node tools/build-updater.mjs --platform windows",
