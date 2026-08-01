@@ -19,10 +19,6 @@ async function releaseDirectory(t) {
     "windows-x64",
   );
   await writeFile(
-    join(root, "CodexAssistant-1.2.3-windows-arm64-setup.exe"),
-    "windows-arm64",
-  );
-  await writeFile(
     join(root, "CodexAssistant-1.2.3-macos-arm64.app.zip"),
     "macos-arm64",
   );
@@ -57,7 +53,7 @@ test("internal test manifest is explicitly not customer ready", async (t) => {
   assert.equal(manifest.releasePolicy.customerReady, false);
   assert.equal(manifest.releasePolicy.codeSigning, "not_verified");
   assert.equal(manifest.releasePolicy.manifestSignature, "not_configured");
-  assert.equal(manifest.artifacts.length, 3);
+  assert.equal(manifest.artifacts.length, 2);
   for (const artifact of manifest.artifacts) {
     assert.equal(artifact.signing.requiredForCustomer, true);
     assert.equal(artifact.signing.status, "not_verified");

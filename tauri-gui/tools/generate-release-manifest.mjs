@@ -14,10 +14,6 @@ function expectedArtifacts(version) {
       { platform: "windows", arch: "x86_64", format: "nsis" },
     ],
     [
-      `CodexAssistant-${version}-windows-arm64-setup.exe`,
-      { platform: "windows", arch: "aarch64", format: "nsis" },
-    ],
-    [
       `CodexAssistant-${version}-macos-arm64.app.zip`,
       { platform: "macos", arch: "aarch64", format: "app.zip" },
     ],

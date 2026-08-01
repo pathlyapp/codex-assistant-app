@@ -78,6 +78,30 @@ function Find-BuildToolsRoot([string]$ExplicitRoot) {
     ". Install VS 2022 Build Tools with the C++ workload, or pass -BuildToolsRoot.")
 }
 
+# ring's build script needs clang. Any host-architecture clang works: it can
+# cross-compile to the aarch64-pc-windows-msvc target even when the binary
+# itself is x64 (running under emulation on ARM64 Windows).
+function Find-LlvmBin([string]$VsRoot, [string]$PreferredArchitecture) {
+  $candidates = @(
+    (Join-Path $VsRoot "VC\Tools\Llvm\$PreferredArchitecture\bin"),
+    (Join-Path $VsRoot "VC\Tools\Llvm\ARM64\bin"),
+    (Join-Path $VsRoot "VC\Tools\Llvm\x64\bin"),
+    (Join-Path $VsRoot "VC\Tools\Llvm\bin"),
+    "C:\Program Files\LLVM\bin"
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path (Join-Path $candidate "clang.exe")) {
+      return $candidate
+    }
+  }
+  $clangOnPath = Get-Command clang.exe -ErrorAction SilentlyContinue
+  if ($clangOnPath) {
+    return (Split-Path -Parent $clangOnPath.Source)
+  }
+  throw ("clang was not found. Checked: " + ($candidates -join "; ") +
+    ". Install the 'C++ Clang Compiler for Windows' component of VS 2022, or standalone LLVM.")
+}
+
 $toolsDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $guiRoot = Split-Path -Parent $toolsDirectory
 if (!$OutputDirectory) {
@@ -114,11 +138,8 @@ Import-VcEnvironment $vcVarsAll $vcArchitecture
 $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $env:PATH = "$cargoBin;$env:PATH"
 
-$llvmBin = Join-Path $BuildToolsRoot "VC\Tools\Llvm\$llvmArchitecture\bin"
-if (!(Test-Path (Join-Path $llvmBin "clang.exe"))) {
-  throw ("LLVM for $Architecture was not found at $llvmBin. " +
-    "Install the 'C++ Clang Compiler for Windows' component of VS 2022.")
-}
+$llvmBin = Find-LlvmBin $BuildToolsRoot $llvmArchitecture
+Write-Host "Using LLVM at $llvmBin"
 $env:PATH = "$llvmBin;$env:PATH"
 
 $installedTargets = @(& rustup target list --installed)

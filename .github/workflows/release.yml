@@ -27,11 +27,8 @@ jobs:
             arch: x64
             rust_target: x86_64-pc-windows-msvc
             runs-on: [self-hosted, windows]
-          - name: windows-arm64
-            platform: windows
-            arch: arm64
-            rust_target: aarch64-pc-windows-msvc
-            runs-on: [self-hosted, windows]
+          # windows-arm64 已暂停发布：self-hosted ARM64 runner 缺少 ARM64 LLVM/Clang
+          # 工具链，恢复前需先完成 runner 环境配置。
           - name: macos-arm64
             platform: macos
             arch: arm64
