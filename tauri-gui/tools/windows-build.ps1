@@ -17,6 +17,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+. (Join-Path $PSScriptRoot "windows-arch.ps1")
+
 function Import-VcEnvironment([string]$VcVarsAll, [string]$TargetArchitecture) {
   $environment = & cmd.exe /d /s /c "call `"$VcVarsAll`" $TargetArchitecture >nul && set"
   if ($LASTEXITCODE -ne 0) {
@@ -45,7 +47,7 @@ if (!$OutputDirectory) {
   $OutputDirectory = Join-Path $guiRoot "artifact"
 }
 
-$nativeArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+$nativeArchitecture = Get-WindowsNativeArchitecture
 if ($Architecture -eq "auto") {
   $Architecture = switch ($nativeArchitecture) {
     "Arm64" { "arm64" }

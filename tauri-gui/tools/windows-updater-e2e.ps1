@@ -16,6 +16,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
+. (Join-Path $PSScriptRoot "windows-arch.ps1")
+
 if ($env:USERNAME -eq "SYSTEM") {
   throw "Run this updater E2E as the interactive Windows user, not SYSTEM"
 }
@@ -268,7 +271,7 @@ try {
 
   [ordered]@{
     schemaVersion = 1
-    architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    architecture = Get-WindowsNativeArchitecture
     baselineVersion = $ExpectedCurrentVersion
     updateVersion = $UpdateVersion
     baselineInstallerSha256 = (Get-FileHash $BaselineInstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+. (Join-Path $PSScriptRoot "windows-arch.ps1")
+
 function Wait-Until([scriptblock]$Condition, [int]$Seconds, [string]$FailureMessage) {
   $deadline = (Get-Date).AddSeconds($Seconds)
   do {
@@ -84,7 +86,7 @@ $result = [ordered]@{
   candidate = $installerFile.Name
   candidateBytes = $installerFile.Length
   candidateSha256 = $candidateSha256
-  osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+  osArchitecture = Get-WindowsNativeArchitecture
   installerExitCode = $installer.ExitCode
   startedDuringInstall = $assistantStartedDuringInstall
   installedExecutable = $assistantExe
