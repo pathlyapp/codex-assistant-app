@@ -177,10 +177,30 @@ select:disabled {
   color: var(--accent);
 }
 
+.sidebar-qr {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  margin-top: auto;
+  padding: 12px 8px 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.sidebar-qr img {
+  width: 128px;
+  height: 128px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 4px;
+  object-fit: contain;
+}
+
 .sidebar-footer {
   display: grid;
   gap: 8px;
-  margin-top: auto;
   padding: 14px 8px 0;
   border-top: 1px solid #d6dae1;
   color: var(--text-muted);
@@ -2251,6 +2271,7 @@ select:disabled {
 
   .brand div,
   .nav-item > span:last-child,
+  .sidebar-qr,
   .sidebar-footer {
     display: none;
   }
