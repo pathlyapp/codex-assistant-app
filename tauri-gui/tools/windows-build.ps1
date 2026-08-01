@@ -1,7 +1,7 @@
 param(
   [ValidateSet("auto", "x64", "arm64")]
   [string]$Architecture = "auto",
-  [string]$BuildToolsRoot = "C:\BuildTools",
+  [string]$BuildToolsRoot = "",
   [string]$OutputDirectory = "",
   [ValidateSet("none", "mock", "production")]
   [string]$UpdaterMode = "none",
@@ -41,6 +41,43 @@ function Invoke-Checked([string]$Program, [string[]]$Arguments) {
   }
 }
 
+function Find-BuildToolsRoot([string]$ExplicitRoot) {
+  if ($ExplicitRoot) {
+    if (Test-Path (Join-Path $ExplicitRoot "VC\Auxiliary\Build\vcvarsall.bat")) {
+      return $ExplicitRoot
+    }
+    throw "Visual Studio Build Tools were not found at $ExplicitRoot"
+  }
+
+  $candidates = @("C:\BuildTools")
+
+  $programFilesX86 = ${env:ProgramFiles(x86)}
+  if ($programFilesX86) {
+    $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+      $installations = & $vswhere -products * -sort -property installationPath
+      foreach ($installation in @($installations)) {
+        if ($installation) { $candidates += $installation.Trim() }
+      }
+    }
+  }
+
+  foreach ($programFiles in @($env:ProgramFiles, $programFilesX86)) {
+    if (!$programFiles) { continue }
+    foreach ($edition in @("BuildTools", "Community", "Professional", "Enterprise")) {
+      $candidates += Join-Path $programFiles "Microsoft Visual Studio\2022\$edition"
+    }
+  }
+
+  foreach ($candidate in $candidates) {
+    if (Test-Path (Join-Path $candidate "VC\Auxiliary\Build\vcvarsall.bat")) {
+      return $candidate
+    }
+  }
+  throw ("Visual Studio Build Tools were not found. Checked: " + ($candidates -join "; ") +
+    ". Install VS 2022 Build Tools with the C++ workload, or pass -BuildToolsRoot.")
+}
+
 $toolsDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $guiRoot = Split-Path -Parent $toolsDirectory
 if (!$OutputDirectory) {
@@ -69,10 +106,9 @@ $llvmArchitecture = switch ($Architecture) {
   "x64" { "x64" }
 }
 
+$BuildToolsRoot = Find-BuildToolsRoot $BuildToolsRoot
+Write-Host "Using Visual Studio Build Tools at $BuildToolsRoot"
 $vcVarsAll = Join-Path $BuildToolsRoot "VC\Auxiliary\Build\vcvarsall.bat"
-if (!(Test-Path $vcVarsAll)) {
-  throw "Visual Studio Build Tools were not found at $vcVarsAll"
-}
 Import-VcEnvironment $vcVarsAll $vcArchitecture
 
 $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
@@ -80,7 +116,8 @@ $env:PATH = "$cargoBin;$env:PATH"
 
 $llvmBin = Join-Path $BuildToolsRoot "VC\Tools\Llvm\$llvmArchitecture\bin"
 if (!(Test-Path (Join-Path $llvmBin "clang.exe"))) {
-  throw "LLVM for $Architecture was not found at $llvmBin"
+  throw ("LLVM for $Architecture was not found at $llvmBin. " +
+    "Install the 'C++ Clang Compiler for Windows' component of VS 2022.")
 }
 $env:PATH = "$llvmBin;$env:PATH"
 
