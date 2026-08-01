@@ -970,7 +970,10 @@ fn discover_models_inner(request: GatewayProbeRequest) -> Result<ModelDiscovery,
                 .map(|modalities| (entry.id.clone(), modalities))
         })
         .collect::<BTreeMap<_, _>>();
-    let models = entries.into_iter().map(|entry| entry.id).collect::<Vec<_>>();
+    let models = entries
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>();
     Ok(ModelDiscovery {
         gateway,
         message: format!("连接成功，发现 {} 个模型", models.len()),
@@ -1260,7 +1263,8 @@ fn install_chatgpt(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
 
 fn validate_router(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOutcome, String> {
     let bearer = setup_bearer(ctx)?;
-    let entries = RouterClient::new(&ctx.options.gateway, bearer.as_deref()).fetch_model_entries()?;
+    let entries =
+        RouterClient::new(&ctx.options.gateway, bearer.as_deref()).fetch_model_entries()?;
     ctx.model_modalities = entries
         .iter()
         .filter_map(|entry| {
@@ -1270,7 +1274,10 @@ fn validate_router(app: &AppHandle, ctx: &mut InstallContext) -> Result<StageOut
                 .map(|modalities| (entry.id.clone(), modalities))
         })
         .collect();
-    let models = entries.into_iter().map(|entry| entry.id).collect::<Vec<_>>();
+    let models = entries
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>();
     if ctx.options.model.is_empty() {
         ctx.options.model = models[0].clone();
     } else if !models.iter().any(|model| model == &ctx.options.model) {

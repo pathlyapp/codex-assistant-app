@@ -522,7 +522,10 @@ mod tests {
         });
         let body = serde_json::to_vec(&payload).unwrap();
         let models = parse_models_response(&body, "http://router.test/v1").unwrap();
-        let ids = models.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>();
+        let ids = models
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(ids, vec!["model-a", "model-b"]);
         assert!(models.iter().all(|entry| entry.input_modalities.is_none()));
         assert!(parse_models_response(b"{\"data\":[]}", "http://router.test/v1").is_err());
