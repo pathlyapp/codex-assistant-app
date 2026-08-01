@@ -10,7 +10,8 @@ param(
   [string]$UpdatePrivateKeyPath = "",
   [ValidateSet("internal-test", "beta", "stable")]
   [string]$UpdateChannel = "internal-test",
-  [switch]$SkipNpmInstall
+  [switch]$SkipNpmInstall,
+  [switch]$Sign
 )
 
 $ErrorActionPreference = "Stop"
@@ -104,6 +105,29 @@ if ($UpdaterMode -ne "none") {
   $env:TAURI_SIGNING_PRIVATE_KEY_PATH = $privateKeyPath
 }
 
+if ($Sign) {
+  if (!$env:WIN_SIGN_PIN) {
+    throw "-Sign requires the WIN_SIGN_PIN environment variable for silent UKey signing"
+  }
+  # Generate the signing overlay config with an absolute signCommand path so the
+  # Tauri bundler can sign the app binary, uninstaller, and NSIS installer.
+  $signScript = Join-Path $toolsDirectory "sign-windows.ps1"
+  $signingConfigDirectory = Join-Path $guiRoot ".local-update"
+  New-Item -ItemType Directory -Force $signingConfigDirectory | Out-Null
+  $signingConfigPath = Join-Path $signingConfigDirectory "tauri.signing.generated.conf.json"
+  [ordered]@{
+    bundle = [ordered]@{
+      windows = [ordered]@{
+        signCommand = [ordered]@{
+          cmd = "powershell.exe"
+          args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $signScript, "%1")
+        }
+      }
+    }
+  } | ConvertTo-Json -Depth 6 | Set-Content $signingConfigPath -Encoding ascii
+  Write-Host "Signing enabled, generated config: $signingConfigPath"
+}
+
 Push-Location $guiRoot
 try {
   if (!$SkipNpmInstall) {
@@ -122,7 +146,11 @@ try {
     "production" { "build:update:windows" }
     default { "build:windows" }
   }
-  Invoke-Checked "npm.cmd" @("run", $buildCommand, "--", "--target", $target)
+  $buildArguments = @("run", $buildCommand, "--", "--target", $target)
+  if ($Sign) {
+    $buildArguments += @("--config", $signingConfigPath)
+  }
+  Invoke-Checked "npm.cmd" $buildArguments
 
   $version = (& node.exe -p "require('./package.json').version").Trim()
   if ($LASTEXITCODE -ne 0 -or !$version) {
