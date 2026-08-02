@@ -136,6 +136,25 @@
   }
   .note b { color: var(--text); }
 
+  /* compare */
+  .compare-wrap { max-width: 860px; margin: 0 auto; }
+  .compare { width: 100%; border-collapse: collapse; }
+  .compare th, .compare td {
+    text-align: left; padding: 15px 18px; border-bottom: 1px solid var(--border);
+    font-size: 14.5px; vertical-align: top;
+  }
+  .compare thead th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  .compare thead th:nth-child(2) { color: var(--accent2); }
+  .compare tbody th { font-weight: 600; color: var(--text); white-space: nowrap; }
+  .compare tbody td { color: var(--muted); }
+  .compare tbody td.ours { color: var(--text); }
+  .compare tr:hover td, .compare tr:hover th { background: rgba(91,140,255,.05); }
+  .compare-foot { max-width: 860px; margin: 18px auto 0; color: var(--muted); font-size: 13.5px; }
+  @media (max-width: 720px) {
+    .compare th, .compare td { padding: 12px 12px; font-size: 13.5px; }
+    .compare tbody th { white-space: normal; }
+  }
+
   /* boundary */
   .boundary { max-width: 820px; margin: 0 auto; }
   .boundary ul { list-style: none; display: grid; gap: 12px; }
@@ -160,6 +179,7 @@
     <div class="nav-links">
       <a href="#features">功能</a>
       <a href="#how">使用流程</a>
+      <a href="#compare">如何选择</a>
       <a href="#download">下载</a>
       <a class="btn btn-ghost" href="https://github.com/pathlyapp/codex-assistant-app" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
@@ -232,6 +252,53 @@
       <div class="step"><div><h3>由你确认重启 ChatGPT</h3><p>验证完成后由用户确认重启，让新配置稳定加载。助手不会反复启动 ChatGPT。</p></div></div>
       <div class="step"><div><h3>进入 Codex，发送真实任务</h3><p>模型名称显示在输入区域，便于确认当前使用的服务，然后开始工作。</p></div></div>
     </div>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="container">
+    <h2 class="section-title">和「多工具切换器」有什么不同</h2>
+    <p class="section-sub">市面上有一类面向开发者的多工具供应商切换器：一个面板管理多款 AI 命令行工具，内置几十种供应商预设，点一下就能切换。它们解决的是「切换效率」问题。Codex 助手走的是另一条路——只服务 ChatGPT 的 Codex 模式，把「第一次接入」做成一条可检查、可恢复的完整流程。</p>
+    <div class="compare-wrap">
+      <table class="compare">
+        <thead>
+          <tr><th></th><th>Codex 助手</th><th>多工具切换器</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>定位</th>
+            <td class="ours">引导式接入向导：测试连接 → 读取真实模型 → 写入配置 → 复核验证，每一步都有真实结果</td>
+            <td>供应商配置切换器：预设一键导入，在多个供应商之间快速切换</td>
+          </tr>
+          <tr>
+            <th>适用对象</th>
+            <td class="ours">第一次接入第三方模型的普通用户，不需要了解配置文件和命令行</td>
+            <td>同时维护多款 AI 工具、频繁更换供应商的开发者</td>
+          </tr>
+          <tr>
+            <th>覆盖范围</th>
+            <td class="ours">专注 ChatGPT 的 Codex 模式，把这一条链路做完整</td>
+            <td>同时管理七八款 AI 命令行与桌面工具</td>
+          </tr>
+          <tr>
+            <th>配置方式</th>
+            <td class="ours">只接管助手自己的 provider，保留客户端其余设置；每次修改前自动保留完整快照，可一键恢复</td>
+            <td>整体切换供应商配置，通常需要重启终端或工具后生效</td>
+          </tr>
+          <tr>
+            <th>验证方式</th>
+            <td class="ours">连接测试、模型列表、写入结果全部真实校验；任一环节失败就明确显示失败，不会「只写配置」伪装成功</td>
+            <td>以切换动作完成为准，是否可用需自行到对应工具里确认</td>
+          </tr>
+          <tr>
+            <th>附加能力</th>
+            <td class="ours">账号与用量概览、本地会话与存储统计、ChatGPT 个性化背景主题</td>
+            <td>系统托盘快速切换、用量统计、故障转移等面向高频切换场景的能力</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="compare-foot">两类工具并不冲突：日常高频切换供应商的开发者可以继续使用顺手的切换器；而当你或身边的朋友第一次把第三方模型接入 ChatGPT Codex 模式时，Codex 助手负责把这条路铺平。</p>
   </div>
 </section>
 
