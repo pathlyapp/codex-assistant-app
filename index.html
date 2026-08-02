@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex 助手 — 第三方模型接入 + 个性化背景，本地完成配置</title>
+<meta name="description" content="Codex 助手把「准备第三方模型服务 → 测试连接 → 选择模型 → 写入配置 → 验证结果 → 设置个性化背景」整理成一条清晰、可检查、可恢复的本地流程。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+<style>
+  :root {
+    --bg: #0b0e14;
+    --bg-soft: #12161f;
+    --card: #171c28;
+    --border: #262d3d;
+    --text: #e8ecf3;
+    --muted: #9aa5b8;
+    --accent: #5b8cff;
+    --accent2: #38d9a9;
+    --grad: linear-gradient(135deg, #5b8cff 0%, #38d9a9 100%);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* nav */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(14px);
+    background: rgba(11,14,20,.72);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .container { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { font-weight: 700; font-size: 18px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .brand:hover { text-decoration: none; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grad); display: inline-block; }
+  .nav-links { display: flex; gap: 24px; align-items: center; font-size: 14px; }
+  .nav-links a { color: var(--muted); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 22px; border-radius: 10px;
+    font-weight: 600; font-size: 15px;
+    border: 1px solid var(--border);
+    color: var(--text); background: var(--card);
+    transition: transform .15s ease, box-shadow .15s ease, background .15s;
+    cursor: pointer;
+  }
+  .btn:hover { transform: translateY(-2px); text-decoration: none; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+  .btn-primary { background: var(--grad); color: #0b0e14; border: none; }
+  .btn-ghost { background: transparent; }
+  .btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+  /* hero */
+  .hero { padding: 96px 0 72px; text-align: center; position: relative; }
+  .hero::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(600px 300px at 30% 20%, rgba(91,140,255,.14), transparent 70%),
+      radial-gradient(500px 260px at 75% 35%, rgba(56,217,169,.10), transparent 70%);
+  }
+  .hero .container { position: relative; }
+  .badge {
+    display: inline-block; padding: 5px 14px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--bg-soft);
+    color: var(--muted); font-size: 13px; margin-bottom: 24px;
+  }
+  .badge b { color: var(--accent2); font-weight: 600; }
+  h1 { font-size: clamp(34px, 5.5vw, 56px); line-height: 1.25; font-weight: 800; letter-spacing: -0.5px; }
+  h1 .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.sub { max-width: 640px; margin: 22px auto 36px; color: var(--muted); font-size: 17px; }
+  .hero-cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+  /* sections */
+  section { padding: 72px 0; }
+  .section-title { text-align: center; margin-bottom: 14px; font-size: 30px; font-weight: 750; }
+  .section-sub { text-align: center; color: var(--muted); max-width: 620px; margin: 0 auto 48px; font-size: 15.5px; }
+
+  .grid { display: grid; gap: 18px; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 820px) { .grid-3, .grid-2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 26px;
+    transition: transform .15s ease, border-color .15s;
+  }
+  .card:hover { transform: translateY(-3px); border-color: #33405a; }
+  .card .num { font-size: 13px; color: var(--accent2); font-weight: 700; letter-spacing: 1px; }
+  .card h3 { font-size: 17px; margin: 8px 0 10px; }
+  .card p { color: var(--muted); font-size: 14.5px; }
+  .card .ico {
+    width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+    background: rgba(91,140,255,.12); font-size: 20px; margin-bottom: 14px;
+  }
+
+  /* video */
+  .video-wrap {
+    max-width: 860px; margin: 0 auto; border-radius: 18px; overflow: hidden;
+    border: 1px solid var(--border); box-shadow: 0 24px 64px rgba(0,0,0,.45);
+    background: #000;
+  }
+  video { width: 100%; display: block; aspect-ratio: 852 / 480; }
+
+  /* steps */
+  .steps { counter-reset: step; display: grid; gap: 14px; max-width: 760px; margin: 0 auto; }
+  .step {
+    display: flex; gap: 18px; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px;
+  }
+  .step::before {
+    counter-increment: step; content: counter(step, decimal-leading-zero);
+    font-weight: 800; font-size: 15px; color: #0b0e14;
+    background: var(--grad); border-radius: 8px; padding: 4px 10px; flex-shrink: 0;
+  }
+  .step h3 { font-size: 16px; margin-bottom: 4px; }
+  .step p { color: var(--muted); font-size: 14px; }
+
+  /* download */
+  .dl-table { width: 100%; border-collapse: collapse; max-width: 760px; margin: 0 auto; }
+  .dl-table th, .dl-table td { text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 14.5px; }
+  .dl-table th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  .dl-table tr:hover td { background: rgba(91,140,255,.05); }
+  .note {
+    max-width: 760px; margin: 24px auto 0; padding: 16px 20px; border-radius: 12px;
+    background: rgba(91,140,255,.08); border: 1px solid rgba(91,140,255,.25);
+    color: var(--muted); font-size: 13.5px;
+  }
+  .note b { color: var(--text); }
+
+  /* boundary */
+  .boundary { max-width: 820px; margin: 0 auto; }
+  .boundary ul { list-style: none; display: grid; gap: 12px; }
+  .boundary li {
+    padding: 16px 20px; border-radius: 12px; background: var(--card);
+    border: 1px solid var(--border); color: var(--muted); font-size: 14.5px;
+    padding-left: 48px; position: relative;
+  }
+  .boundary li::before { content: "⚠️"; position: absolute; left: 18px; top: 15px; }
+
+  footer { border-top: 1px solid var(--border); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
+  footer .container { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a class="brand" href="#top"><span class="dot"></span>Codex 助手</a>
+    <div class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#how">使用流程</a>
+      <a href="#download">下载</a>
+      <a class="btn btn-ghost" href="https://github.com/pathlyapp/codex-assistant-app" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="container">
+    <span class="badge">v0.9.3 · <b>MIT 开源</b> · Windows / macOS</span>
+    <h1>第三方模型接入 + 个性化背景<br><span class="grad">全部在本地完成配置</span></h1>
+    <p class="sub">Codex 助手把「准备第三方模型服务 → 测试连接 → 选择模型 → 写入配置 → 验证结果 → 打开 Codex → 设置个性化背景」整理成一条清晰、可检查、可恢复的本地流程。</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#download">立即下载</a>
+      <a class="btn" href="#video">观看演示视频</a>
+      <a class="btn btn-ghost" href="https://github.com/pathlyapp/codex-assistant-app" target="_blank" rel="noopener">查看源码</a>
+    </div>
+  </div>
+</header>
+
+<section id="pain">
+  <div class="container">
+    <h2 class="section-title">你想使用 Codex，却可能卡在这三步</h2>
+    <p class="section-sub">很多用户不是不会使用 AI，而是在真正开始之前，就被账号、网络和付费环节挡住了。</p>
+    <div class="grid grid-3">
+      <div class="card"><div class="num">01</div><h3>账号注册与验证麻烦</h3><p>注册流程、地区限制或验证步骤增加了使用门槛。</p></div>
+      <div class="card"><div class="num">02</div><h3>网络访问不够稳定</h3><p>连接不稳定会影响登录、模型调用和日常使用体验。</p></div>
+      <div class="card"><div class="num">03</div><h3>购买、支付和续费不方便</h3><p>海外支付、套餐选择和持续续费，让长期使用变得复杂。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="video">
+  <div class="container">
+    <h2 class="section-title">产品演示</h2>
+    <p class="section-sub">6 分钟看完：从服务信息到模型可用，再到个性化背景的完整流程。</p>
+    <div class="video-wrap">
+      <video controls preload="metadata" src="https://github.com/pathlyapp/codex-assistant-app/releases/download/v0.9.3/CodexAssistant-intro.mp4">
+        你的浏览器不支持视频播放，可直接<a href="https://github.com/pathlyapp/codex-assistant-app/releases/download/v0.9.3/CodexAssistant-intro.mp4">下载演示视频</a>。
+      </video>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="container">
+    <h2 class="section-title">功能特性</h2>
+    <p class="section-sub">你只需准备好第三方服务商的接口地址与 Access Key，其余交给助手完成真实验证。</p>
+    <div class="grid grid-3">
+      <div class="card"><div class="ico">📊</div><h3>状态首页</h3><p>一眼看到 ChatGPT、模型服务和 Codex 配置状态，需要处理的项目直接显示出来。</p></div>
+      <div class="card"><div class="ico">🔌</div><h3>模型服务接入</h3><p>填写服务地址与密钥，真实测试连接，从接口读取真实模型列表 —— 不用占位数据，连接成功前保存按钮保持禁用。</p></div>
+      <div class="card"><div class="ico">👤</div><h3>账号与数据</h3><p>查看 Codex 账号邮箱、套餐与用量额度，以及本地会话、任务与存储占用概览。</p></div>
+      <div class="card"><div class="ico">🎨</div><h3>主题换肤</h3><p>官方外观、专注深色、在线精选主题，或使用自己的本地图片。图片先在本地校验格式与尺寸，不上传到任何服务。</p></div>
+      <div class="card"><div class="ico">🔐</div><h3>密钥安全</h3><p>Access Key 默认隐藏显示，Windows 下使用当前用户 DPAPI 加密保存，不以明文写入 Codex 配置文件。</p></div>
+      <div class="card"><div class="ico">↩️</div><h3>备份与恢复</h3><p>每次修改配置前保留完整快照，配置失败可查看诊断信息，一键恢复最近一次设置。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="container">
+    <h2 class="section-title">使用流程</h2>
+    <p class="section-sub">五个步骤，从服务信息到模型可用。</p>
+    <div class="steps">
+      <div class="step"><div><h3>打开助手，检查当前状态</h3><p>首页检查 ChatGPT 是否安装、模型服务是否可访问、Codex 配置是否完成。</p></div></div>
+      <div class="step"><div><h3>填写第三方模型服务信息</h3><p>进入「模型服务」，填写服务地址和访问密钥，点击「测试连接」。密钥默认隐藏。</p></div></div>
+      <div class="step"><div><h3>读取真实模型并选择默认模型</h3><p>连接成功后，助手从服务接口读取实际模型列表；选择模型后保存配置。</p></div></div>
+      <div class="step"><div><h3>由你确认重启 ChatGPT</h3><p>验证完成后由用户确认重启，让新配置稳定加载。助手不会反复启动 ChatGPT。</p></div></div>
+      <div class="step"><div><h3>进入 Codex，发送真实任务</h3><p>模型名称显示在输入区域，便于确认当前使用的服务，然后开始工作。</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="container">
+    <h2 class="section-title">下载安装</h2>
+    <p class="section-sub">当前版本 v0.9.3。每个发布附带 <code>SHA256SUMS.txt</code> 校验文件，<a href="https://github.com/pathlyapp/codex-assistant-app/releases" target="_blank" rel="noopener">查看所有版本</a>。</p>
+    <table class="dl-table">
+      <thead><tr><th>平台</th><th>安装包</th><th></th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Windows x64</td>
+          <td><code>CodexAssistant-0.9.3-windows-x64-setup.exe</code></td>
+          <td><a class="btn btn-primary" href="https://github.com/pathlyapp/codex-assistant-app/releases/download/v0.9.3/CodexAssistant-0.9.3-windows-x64-setup.exe">下载</a></td>
+        </tr>
+        <tr>
+          <td>macOS Apple Silicon</td>
+          <td><code>CodexAssistant-0.9.3-macos-arm64.dmg</code></td>
+          <td><a class="btn btn-primary" href="https://github.com/pathlyapp/codex-assistant-app/releases/download/v0.9.3/CodexAssistant-0.9.3-macos-arm64.dmg">下载</a></td>
+        </tr>
+        <tr>
+          <td>macOS Apple Silicon</td>
+          <td><code>CodexAssistant-0.9.3-macos-arm64.app.zip</code></td>
+          <td><a class="btn" href="https://github.com/pathlyapp/codex-assistant-app/releases/download/v0.9.3/CodexAssistant-0.9.3-macos-arm64.app.zip">下载</a></td>
+        </tr>
+        <tr>
+          <td>校验文件</td>
+          <td><code>SHA256SUMS.txt</code></td>
+          <td><a class="btn" href="https://github.com/pathlyapp/codex-assistant-app/releases/download/v0.9.3/SHA256SUMS.txt">下载</a></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <b>安全提示：</b>当前安装包尚未进行代码签名与公证，Windows SmartScreen 或 macOS Gatekeeper 可能提示「未知开发者」。请确认下载来源为本页面或官方 GitHub Releases，并通过 SHA256 校验文件完整性。
+    </div>
+    <div class="note" style="margin-top:14px;">
+      <b>使用前你只需要准备：</b>已安装并完成初始化的官方 ChatGPT 客户端；第三方服务商提供的 OpenAI-compatible 接口地址；服务商的 Access Key 与希望使用的模型。
+    </div>
+  </div>
+</section>
+
+<section id="boundary">
+  <div class="container">
+    <h2 class="section-title">使用前，你需要知道这些边界</h2>
+    <p class="section-sub">Codex 助手不是 OpenAI 官方客户端，也不代办账号注册或网络服务。</p>
+    <div class="boundary">
+      <ul>
+        <li>官方客户端仍然保留：助手不会重新分发或修改 ChatGPT。普通聊天、账号、订阅和聊天记录不受第三方模型配置影响。</li>
+        <li>第三方服务由用户自行选择：不同服务商的模型、价格、稳定性、数据处理方式和续费规则可能不同，请阅读服务商条款并遵守所在地法律法规。</li>
+        <li>不要在截图、录屏或公开文档中展示完整 Access Key。配置、运行状态和主题设置都保存在用户本地目录。</li>
+        <li>主题只作用于本地会话，不修改 ChatGPT 的安装文件；即使恢复官方外观，也不会影响已配置的第三方模型服务。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div>Codex 助手 · MIT License © 2026 523Tech</div>
+    <div>
+      <a href="https://github.com/pathlyapp/codex-assistant-app" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://github.com/pathlyapp/codex-assistant-app/releases" target="_blank" rel="noopener">Releases</a> ·
+      <a href="https://github.com/pathlyapp/codex-assistant-app/issues" target="_blank" rel="noopener">问题反馈</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
