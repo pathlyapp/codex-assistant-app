@@ -4,6 +4,8 @@ All notable changes to Codex Assistant are documented in this file.
 
 ## [Unreleased]
 
+- Added an "账号与数据" (Account & Data) page in the sidebar: imports cloud-only account info and live rate-limit usage from the ChatGPT backend into a local token-free snapshot (reads `~/.codex/auth.json`, `CODEX_HOME` aware), and shows a local data overview (session counts, recent threads, storage footprint) without reading conversation content.
+
 ## [0.9.1] - 2026-08-01
 
 - Added a signed in-app updater for the assistant itself: automatic and manual update checks, signature-verified downloads, one-click install, and post-update health confirmation.

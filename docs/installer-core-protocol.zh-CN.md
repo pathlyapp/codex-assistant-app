@@ -126,6 +126,26 @@ Tauri 在下载完成返回前执行 Minisign 校验，只有 `verification=veri
 `WP-604A` 客户端阶段；代码签名、客户分发、撤销和安装后强制回退仍是独立门禁。完整
 边界见 `docs/wp-604a-updater-client.zh-CN.md`。
 
+### 账号命令
+
+`get_codex_account_status` 和 `import_codex_account` 返回 `CodexAccountStatusV1`，
+stage 固定在 `account_status` / `account_import`，错误使用同一 `ErrorEnvelopeV1`。
+
+- 登录状态只读取 `~/.codex/auth.json`（尊重 `CODEX_HOME`），判定为
+  `chatgpt` / `api_key` / `not_logged_in`；文件损坏或超过 64 KiB 返回错误而不是
+  误判为未登录；拒绝解析指向 Codex 目录之外的符号链接。
+- 账号邮箱、姓名、套餐来自 `tokens.id_token` 的 JWT claims 本地解码，不验签、不联网。
+- `import_codex_account` 调用 `GET {apiBase}/wham/usage`（默认
+  `https://chatgpt.com/backend-api`，可用 `CODEX_ASSISTANT_ACCOUNT_API_BASE` 覆盖），
+  请求头与 Codex CLI 一致；HTTP 客户端读取系统代理环境变量。
+- 导入结果原子写入 `runtime/account-snapshot.json`。快照只含展示安全字段，任何
+  token 一律不持久化、不进入日志。用量拉取失败时保留档案快照并在 `message` 说明；
+  401/403 视为登录过期，不写快照，引导重新 `codex login`。
+- `CodexAccountStatusV1.localData` 提供本地数据概览：会话/归档计数、存储字节、
+  最近会话（`session_index.jsonl` 前 3 条）。只做文件元数据统计，不读取会话正文，
+  不跟随符号链接，遍历条目有上限；任何子项失败都只降级为零值，不影响命令成功。
+- 账号命令失败不得改变核心 `SystemStatus.overall`。
+
 ### 外观命令
 
 `get_appearance_status`、`apply_appearance`、`import_theme_image`、

@@ -29,6 +29,7 @@ const ICONS = {
   shieldCheck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/><path d="m9 12 2 2 4-4"/></svg>',
   terminal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>',
   unplug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/></svg>',
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>',
 };
 
@@ -87,6 +88,7 @@ const STAGE_GUIDED_STEP = {
 
 const VIEW_COPY = {
   overview: ["首页", "查看 ChatGPT 与模型服务是否就绪"],
+  account: ["账号与数据", "Codex 账号配额与本地数据一览"],
   setup: ["模型服务", "连接模型服务，并选择 Codex 默认使用的模型"],
   appearance: ["主题换肤", "切换 ChatGPT 工作界面与自定义背景"],
   diagnostics: ["帮助与诊断", "检查环境，或导出已隐去隐私信息的诊断结果"],
@@ -128,6 +130,8 @@ const state = {
   repairPlan: null,
   repairRequestId: 0,
   repairing: false,
+  account: null,
+  accountBusy: false,
   assistantUpdate: null,
   assistantUpdateBusy: false,
   assistantUpdateHealthConfirmed: false,
@@ -174,6 +178,8 @@ function bindUi() {
     refreshStatus();
   });
   $("#runDiagnosticsButton").addEventListener("click", () => refreshStatus());
+  $("#importAccountButton").addEventListener("click", importAccount);
+  $("#refreshAccountButton").addEventListener("click", () => refreshAccountStatus());
   $("#overviewAction").addEventListener("click", onOverviewAction);
   $("#appInstallButton").addEventListener("click", installChatGPT);
   $("#editConfigButton").addEventListener("click", () => navigate("setup"));
@@ -257,6 +263,7 @@ function navigate(view) {
     loadPresetThemes();
     loadGalleryThemes();
   }
+  if (view === "account") refreshAccountStatus();
   if (view === "setup") renderSetupGate(state.status);
   if (view === "diagnostics" && state.status) {
     refreshRepairPlan();
@@ -1368,7 +1375,8 @@ function formatBytes(value) {
   const bytes = Number(value || 0);
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 async function refreshLifecycleStatus() {
@@ -1933,6 +1941,198 @@ function closeConfirmation(accepted) {
   $("#confirmOverlay").classList.add("hidden");
   if (resolver) resolver(accepted);
   if (returnFocus?.isConnected) window.setTimeout(() => returnFocus.focus(), 0);
+}
+
+const ACCOUNT_LOGIN_LABELS = {
+  chatgpt: ["已登录", "success"],
+  api_key: ["API Key 登录", "neutral"],
+  not_logged_in: ["未登录", "warning"],
+};
+const ACCOUNT_PLAN_LABELS = {
+  plus: "ChatGPT Plus",
+  pro: "ChatGPT Pro",
+  team: "ChatGPT Team",
+  business: "ChatGPT Business",
+  enterprise: "ChatGPT Enterprise",
+  edu: "ChatGPT Edu",
+  free: "ChatGPT Free",
+};
+
+async function refreshAccountStatus() {
+  if (!tauri?.core) {
+    setAccountPanel("attention", "界面预览模式", "请从 Codex 助手桌面程序打开以读取登录状态。");
+    return;
+  }
+  if (!state.account) setAccountPanel("loading", "正在读取 Codex 登录状态", "请稍候");
+  try {
+    const status = await tauri.core.invoke("get_codex_account_status");
+    state.account = status;
+    renderAccount(status);
+  } catch (error) {
+    setAccountPanel("attention", "读取登录状态失败", friendlyError(error));
+    const badge = $("#accountLoginBadge");
+    badge.textContent = "读取失败";
+    badge.className = "status-badge error";
+    $("#importAccountButton").disabled = true;
+  }
+}
+
+async function importAccount() {
+  if (!tauri?.core || state.accountBusy) return;
+  state.accountBusy = true;
+  const button = $("#importAccountButton");
+  button.disabled = true;
+  $("#importAccountLabel").textContent = "正在导入";
+  try {
+    const status = await tauri.core.invoke("import_codex_account");
+    state.account = status;
+    renderAccount(status);
+  } catch (error) {
+    setAccountPanel("attention", "导入未完成", friendlyError(error));
+    button.disabled = state.account?.loginState !== "chatgpt";
+  } finally {
+    $("#importAccountLabel").textContent = state.account?.snapshot ? "重新导入" : "导入到本地";
+    state.accountBusy = false;
+  }
+}
+
+function setAccountPanel(kind, title, detail) {
+  const panel = $("#accountStatusPanel");
+  panel.className = `readiness-panel ${kind === "ready" ? "" : kind}`.trim();
+  $("#accountStatusTitle").textContent = title;
+  $("#accountStatusDetail").textContent = detail;
+  const icon = kind === "ready" ? ICONS.check : kind === "attention" ? ICONS.alert : kind === "loading" ? ICONS.loader : ICONS.user;
+  const iconTarget = $("#accountStatusPanel .readiness-icon .icon");
+  iconTarget.innerHTML = icon;
+  iconTarget.classList.toggle("spin", kind === "loading");
+}
+
+function renderAccount(status) {
+  const [loginLabel, loginTone] = ACCOUNT_LOGIN_LABELS[status.loginState] || ["未知", "neutral"];
+  const badge = $("#accountLoginBadge");
+  badge.textContent = loginLabel;
+  badge.className = `status-badge ${loginTone}`;
+
+  const profile = status.profile || {};
+  if (status.loginState === "chatgpt") {
+    setAccountPanel("ready", profile.email ? `当前账号：${profile.email}` : "已登录 ChatGPT 账号", status.message);
+  } else {
+    setAccountPanel("attention", loginLabel, status.message);
+  }
+
+  $("#accountAuthMode").textContent =
+    status.loginState === "chatgpt" ? "ChatGPT 账号" : status.loginState === "api_key" ? "API Key" : "未登录";
+  $("#accountEmail").textContent = profile.email || status.snapshot?.email || "未读取";
+  $("#accountName").textContent = profile.name || status.snapshot?.name || "未读取";
+  const plan = profile.planType || status.snapshot?.planType;
+  $("#accountPlan").textContent = plan ? ACCOUNT_PLAN_LABELS[plan] || plan : "未知";
+  $("#accountId").textContent = profile.accountId || status.snapshot?.accountId || "未知";
+  $("#accountLastRefresh").textContent = formatAccountTime(status.lastRefresh);
+
+  const usage = status.snapshot?.usage || null;
+  renderAccountUsage(usage);
+  renderLocalData(status.localData);
+  $("#accountSnapshotTime").textContent = status.snapshot
+    ? formatAccountTime(status.snapshot.importedAt)
+    : "尚未导入";
+  $("#accountSnapshotPath").textContent = status.snapshotPath || "--";
+  $("#accountSnapshotPath").title = status.snapshotPath || "";
+
+  const importButton = $("#importAccountButton");
+  importButton.disabled = status.loginState !== "chatgpt" || state.accountBusy;
+  $("#importAccountLabel").textContent = status.snapshot ? "重新导入" : "导入到本地";
+}
+
+function renderAccountUsage(usage) {
+  const usageBadge = $("#accountUsageBadge");
+  if (!usage) {
+    usageBadge.textContent = "未导入";
+    usageBadge.className = "status-badge neutral";
+    $("#accountUsageHint").textContent = "点击“导入到本地”拉取最新用量。";
+    renderUsageWindow("primary", null);
+    renderUsageWindow("secondary", null);
+    $("#accountCreditsRow").classList.add("hidden");
+    return;
+  }
+  usageBadge.textContent = usage.limitReached ? "已达上限" : usage.allowed ? "正常" : "不可用";
+  usageBadge.className = `status-badge ${usage.limitReached || !usage.allowed ? "error" : "success"}`;
+  $("#accountUsageHint").textContent = `数据拉取于 ${formatAccountTime(usage.fetchedAt)}`;
+  renderUsageWindow("primary", usage.primaryWindow);
+  renderUsageWindow("secondary", usage.secondaryWindow);
+
+  const credits = usage.credits;
+  const showCredits = credits && (credits.hasCredits || credits.unlimited);
+  $("#accountCreditsRow").classList.toggle("hidden", !showCredits);
+  if (showCredits) {
+    $("#accountCreditsText").textContent = credits.unlimited
+      ? "当前账号额度不受限"
+      : `剩余额度：${credits.balance || "未知"}`;
+  }
+}
+
+function renderUsageWindow(kind, usageWindow) {
+  const row = $(`#${kind}WindowRow`);
+  if (kind === "secondary") row.classList.toggle("hidden", !usageWindow);
+  $(`#${kind}WindowPercent`).textContent = usageWindow ? `已用 ${usageWindow.usedPercent}%` : "--";
+  $(`#${kind}WindowBar`).style.width = usageWindow ? `${usageWindow.usedPercent}%` : "0";
+  row.classList.toggle("limit-reached", Boolean(usageWindow && usageWindow.usedPercent >= 100));
+  if (!usageWindow) {
+    $(`#${kind}WindowReset`).textContent = kind === "primary" ? "导入后显示重置时间" : "";
+    return;
+  }
+  const windowDays = usageWindow.limitWindowSeconds
+    ? `窗口 ${formatWindowLength(usageWindow.limitWindowSeconds)}`
+    : "";
+  const reset = usageWindow.resetAt ? `预计 ${formatAccountTime(usageWindow.resetAt)} 重置` : "重置时间未知";
+  $(`#${kind}WindowReset`).textContent = `${reset}${windowDays ? `（${windowDays}）` : ""}`;
+}
+
+function renderLocalData(data) {
+  const badge = $("#localDataBadge");
+  if (!data) {
+    badge.textContent = "--";
+    badge.className = "status-badge neutral";
+    $("#recentThreadEmpty").classList.remove("hidden");
+    return;
+  }
+  badge.textContent = `${data.sessionCount} 个会话`;
+  badge.className = `status-badge ${data.sessionCount > 0 ? "success" : "neutral"}`;
+  $("#localSessionCount").textContent = `${data.sessionCount} 个`;
+  $("#localArchivedCount").textContent = data.archivedSessionCount > 0 ? `${data.archivedSessionCount} 个` : "无";
+  $("#localLatestSession").textContent = formatAccountTime(data.latestSessionAt);
+  $("#localStorageBytes").textContent = formatBytes(data.totalBytes);
+  $("#localStorageBytes").title = `会话 ${formatBytes(data.sessionsBytes)} · 日志 ${formatBytes(data.logsBytes)}`;
+  $("#localDataHome").textContent = data.codexHome || "--";
+  $("#localDataHome").title = data.codexHome || "";
+
+  const threads = data.recentThreads || [];
+  const list = $("#recentThreadList");
+  list.replaceChildren();
+  threads.forEach((thread) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = thread.name || "未命名会话";
+    name.title = thread.id;
+    const time = document.createElement("time");
+    time.textContent = formatAccountTime(thread.updatedAt);
+    item.append(name, time);
+    list.appendChild(item);
+  });
+  $("#recentThreadEmpty").classList.toggle("hidden", threads.length > 0);
+}
+
+function formatWindowLength(seconds) {
+  const days = Math.round(seconds / 86400);
+  if (days >= 1) return `${days} 天`;
+  const hours = Math.round(seconds / 3600);
+  return hours >= 1 ? `${hours} 小时` : `${Math.max(1, Math.round(seconds / 60))} 分钟`;
+}
+
+function formatAccountTime(iso) {
+  if (!iso) return "未知";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function friendlyError(error) {

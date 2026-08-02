@@ -22,6 +22,9 @@
           <button class="nav-item active" type="button" data-view="overview">
             <span class="icon" data-icon="home"></span><span>首页</span>
           </button>
+          <button class="nav-item" type="button" data-view="account">
+            <span class="icon" data-icon="user"></span><span>账号与数据</span>
+          </button>
           <button class="nav-item" type="button" data-view="setup">
             <span class="icon" data-icon="route"></span><span>模型服务</span>
           </button>
@@ -135,6 +138,109 @@
               <div><dt>默认模型</dt><dd id="currentModel">未设置</dd></div>
               <div><dt>访问密钥</dt><dd id="currentKeyState">未设置</dd></div>
             </dl>
+          </section>
+        </section>
+
+        <section id="accountView" class="view" data-view-panel="account">
+          <div id="accountStatusPanel" class="readiness-panel loading">
+            <div class="readiness-icon"><span class="icon" data-icon="user"></span></div>
+            <div class="readiness-copy">
+              <h2 id="accountStatusTitle">正在读取 Codex 登录状态</h2>
+              <p id="accountStatusDetail">请稍候</p>
+            </div>
+            <button id="importAccountButton" class="primary-button" type="button" disabled>
+              <span class="icon" data-icon="download"></span><span id="importAccountLabel">导入到本地</span>
+            </button>
+          </div>
+
+          <section class="current-config" aria-labelledby="accountInfoTitle">
+            <div class="section-title-row">
+              <div>
+                <h2 id="accountInfoTitle">账号信息</h2>
+                <p>来自本机 Codex 登录凭证，只在本地展示，不显示任何密钥内容。</p>
+              </div>
+              <span id="accountLoginBadge" class="status-badge pending">检查中</span>
+            </div>
+            <dl class="config-list">
+              <div><dt>登录方式</dt><dd id="accountAuthMode">未知</dd></div>
+              <div><dt>邮箱</dt><dd id="accountEmail">未读取</dd></div>
+              <div><dt>姓名</dt><dd id="accountName">未读取</dd></div>
+              <div><dt>套餐</dt><dd id="accountPlan">未知</dd></div>
+              <div><dt>账号 ID</dt><dd id="accountId">未知</dd></div>
+              <div><dt>登录刷新时间</dt><dd id="accountLastRefresh">未知</dd></div>
+            </dl>
+          </section>
+
+          <section class="current-config" aria-labelledby="accountUsageTitle">
+            <div class="section-title-row">
+              <div>
+                <h2 id="accountUsageTitle">配额用量</h2>
+                <p id="accountUsageHint">点击“导入到本地”拉取最新用量。</p>
+              </div>
+              <span id="accountUsageBadge" class="status-badge neutral">未导入</span>
+            </div>
+            <div class="usage-body">
+              <div class="usage-row" id="primaryWindowRow">
+                <div class="usage-row-head">
+                  <strong>主配额窗口</strong>
+                  <span id="primaryWindowPercent">--</span>
+                </div>
+                <div class="progress-track"><div id="primaryWindowBar"></div></div>
+                <small id="primaryWindowReset">导入后显示重置时间</small>
+              </div>
+              <div class="usage-row hidden" id="secondaryWindowRow">
+                <div class="usage-row-head">
+                  <strong>次级配额窗口</strong>
+                  <span id="secondaryWindowPercent">--</span>
+                </div>
+                <div class="progress-track"><div id="secondaryWindowBar"></div></div>
+                <small id="secondaryWindowReset"></small>
+              </div>
+              <div class="usage-credits hidden" id="accountCreditsRow">
+                <span class="icon" data-icon="info"></span>
+                <span id="accountCreditsText"></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="current-config" aria-labelledby="localDataTitle">
+            <div class="section-title-row">
+              <div>
+                <h2 id="localDataTitle">本地数据</h2>
+                <p>Codex 的会话与任务都保存在本机。这里只做概览，不读取也不上传会话内容。</p>
+              </div>
+              <span id="localDataBadge" class="status-badge neutral">--</span>
+            </div>
+            <dl class="config-list">
+              <div><dt>会话总数</dt><dd id="localSessionCount">--</dd></div>
+              <div><dt>已归档会话</dt><dd id="localArchivedCount">--</dd></div>
+              <div><dt>最近活跃</dt><dd id="localLatestSession">--</dd></div>
+              <div><dt>存储占用</dt><dd id="localStorageBytes">--</dd></div>
+              <div><dt>数据目录</dt><dd id="localDataHome">--</dd></div>
+            </dl>
+            <div class="recent-threads">
+              <h3>最近会话</h3>
+              <ul id="recentThreadList" class="recent-thread-list"></ul>
+              <p id="recentThreadEmpty" class="recent-thread-empty hidden">暂无会话记录</p>
+            </div>
+          </section>
+
+          <section class="current-config" aria-labelledby="accountSnapshotTitle">
+            <div class="section-title-row">
+              <div>
+                <h2 id="accountSnapshotTitle">本地快照</h2>
+                <p>快照只保存展示安全的字段，不包含任何登录密钥。</p>
+              </div>
+            </div>
+            <dl class="config-list">
+              <div><dt>上次导入</dt><dd id="accountSnapshotTime">尚未导入</dd></div>
+              <div><dt>快照位置</dt><dd id="accountSnapshotPath">--</dd></div>
+            </dl>
+            <div class="diagnostic-actions">
+              <button id="refreshAccountButton" class="secondary-button" type="button">
+                <span class="icon" data-icon="refresh"></span><span>重新读取</span>
+              </button>
+            </div>
           </section>
         </section>
 

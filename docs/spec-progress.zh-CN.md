@@ -29,6 +29,7 @@
 | M5 小白用户交互 | 进行中 | PR #18 已合并；四步向导、真实前置状态、成功/失败/回滚 E2E 和响应式断点已接入 | 125%/150% 缩放、键盘、屏幕阅读器和缺失应用人工路径验收 |
 | M6 诊断与生命周期 | 进行中 | PR #21 诊断包、PR #22 定向修复、PR #23 生命周期边界已合并；`WP-604A` 更新客户端、签名下载、回环 mock 和 Windows ARM64 两真实版本 E2E 已验证 | 助手与快捷方式修复、真实 x64、客户签名/分发和安装后强制回退 |
 | M7 签名与企业交付 | 进行中 | PR #24 已合并；WP-700 发布分级已验证：未签名包只允许内部测试，客户渠道硬阻断，发布说明固定披露限制 | Windows 签名、macOS 公证、客户下载、撤销、恢复代理与企业网络 |
+| M8 账号与数据 | 进行中 | `docs/m8-account-import.zh-CN.md`；`account.rs` 登录判定、id_token 解码、wham/usage 拉取、原子快照、本地数据概览；16 项 Rust 单测 + 6 项前端逻辑测试 + 本机真实账号 live 导入通过 | macOS 实机页面验收、token 静默刷新、快照加密 |
 
 状态只允许使用：`未开始`、`进行中`、`受阻`、`待验证`、`已验证`。
 
@@ -59,6 +60,10 @@
 | WP-603 卸载边界 | 待验证 | PR [#23](https://github.com/theivanxu/codex-assistant/pull/23)；`docs/m6-lifecycle-boundaries.zh-CN.md`；Windows 双目标 67/0/1；ARM64 原生与 x64 兼容层真实页面、交互 handoff、NSIS 默认保留和同包重装 E2E | 签名 macOS 候选、真实 x64、卸载异常矩阵 |
 | WP-604A 更新客户端 | 已验证 | `docs/wp-604a-updater-client.zh-CN.md`；Rust/Node 门禁、普通构建启动/单实例、macOS updater 签名产物、Windows ARM64 NSIS updater 和 `0.9.0 -> 0.9.1` 页面下载/验签/安装/重启/健康 E2E | 转入真实 x64、`WP-701` 代码签名、`WP-702` 客户分发和 `WP-604B` 强制回退 |
 | WP-700 发布分级门禁 | 已验证 | PR [#24](https://github.com/theivanxu/codex-assistant/pull/24) 合并为 `main@501f071`；CI run `30416453400` 通过；schema v2 内部清单、客户渠道阻断、规范三平台附件集合、固定发布说明和 6/6 Node 测试 | 转入 WP-701 代码签名、WP-702 客户分发和 WP-604 签名自更新 |
+| WP-801 账号登录判定 | 待验证 | `account.rs` 三态判定（chatgpt/api_key/not_logged_in）、损坏与超限 auth.json 错误路径、符号链接逃逸拒绝 | Windows 实机复核 |
+| WP-802 账号信息与用量导入 | 待验证 | id_token JWT 本地解码、`GET /wham/usage` 真实拉取、401 不覆盖旧快照、用量失败保留档案快照；本机真实账号 live 导入通过 | 代理/断网矩阵、Windows 实机 |
+| WP-803 账号页与本地快照 | 待验证 | 侧边栏“账号与数据”页、用量进度条、快照落盘不含任何 token；`tools/account-view.test.mjs` 逻辑测试 | 820x640 与 940x720 实机渲染 |
+| WP-804 本地数据概览 | 待验证 | `account.rs` 会话/归档计数、存储字节汇总、会话索引最近 3 条解析；目录缺失零值与坏行跳过单测；前端概览与零态逻辑测试 | macOS 实机核对真实数据 |
 
 ## 证据规则
 

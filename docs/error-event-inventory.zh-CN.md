@@ -65,6 +65,18 @@
 主题、图库和外观错误使用独立 `appearance_*` stage，不改变核心
 `SystemStatus.overall`。
 
+账号命令使用独立 `account_*` stage，同样不改变核心 `SystemStatus.overall`：
+
+| 稳定 code | 当前来源示例 | stage | recoverable | suggestedAction |
+| --- | --- | --- | --- | --- |
+| `UNKNOWN_ERROR` | auth.json 损坏、超限或符号链接逃逸 | `account_status` | true | `retry` |
+| `UNKNOWN_ERROR` | 未登录、API Key 模式或登录过期（401/403） | `account_import` | true | `relogin_codex` |
+| `UNKNOWN_ERROR` | 快照序列化/原子写入失败 | `account_import` | true | `retry` |
+| `INTERNAL_TASK_FAILED` | 后台任务 join/panic | `account_*` | true | `retry` |
+
+用量接口的瞬时失败（网络、5xx、解析）不算命令失败：快照照常落盘，
+`CodexAccountStatusV1.message` 说明部分成功。
+
 ## 2. 当前工作流事件
 
 事件名：`installer-stage`
@@ -112,6 +124,11 @@
 - `import_theme_image`
 - `list_preset_themes`
 - `list_gallery_themes`
+
+账号命令使用同一 envelope，并以 `account_*` stage 隔离：
+
+- `get_codex_account_status`
+- `import_codex_account`
 
 诊断导出使用 `export_diagnostics` 命令和 `diagnostics_export` stage。二次扫描发现疑似
 凭据或用户目录时返回 `DIAGNOSTIC_SECRET_DETECTED`，并阻止生成可下载文件。

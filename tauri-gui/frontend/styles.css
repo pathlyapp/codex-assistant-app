@@ -1914,6 +1914,113 @@ select:disabled {
   margin-top: 8px;
 }
 
+.usage-body {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.usage-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.usage-row-head > strong {
+  font-weight: 600;
+}
+
+.usage-row-head > span {
+  color: var(--text-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.usage-row .progress-track {
+  margin-top: 8px;
+}
+
+.usage-row > small {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.usage-row.limit-reached .progress-track > div {
+  background: var(--danger);
+}
+
+.usage-credits {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f7f9fb;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.usage-credits .icon {
+  flex-shrink: 0;
+}
+
+.recent-threads {
+  margin-top: 16px;
+}
+
+.recent-threads > h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.recent-thread-list {
+  display: grid;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-thread-list > li {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.recent-thread-list > li:last-child {
+  border-bottom: 0;
+}
+
+.recent-thread-list span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-thread-list time {
+  flex-shrink: 0;
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.recent-thread-empty {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
 .update-notes {
   max-height: 76px;
   margin-top: 12px !important;

@@ -23,6 +23,7 @@ use url::Url;
 
 use std::io::{Cursor, Read};
 
+mod account;
 mod config_transaction;
 mod contracts;
 mod diagnostics;
@@ -679,6 +680,49 @@ async fn apply_appearance(theme: String) -> Result<AppearanceStatus, ErrorEnvelo
         .await
         .map_err(|error| command_error("appearance_apply", format!("应用外观任务失败: {error}")))?
         .map_err(|error| command_error("appearance_apply", error))
+}
+
+#[tauri::command]
+async fn get_codex_account_status() -> Result<account::CodexAccountStatusV1, ErrorEnvelopeV1> {
+    tauri::async_runtime::spawn_blocking(collect_codex_account_status)
+        .await
+        .map_err(|error| command_error("account_status", format!("读取账号状态任务失败: {error}")))?
+        .map_err(|error| command_error("account_status", error))
+}
+
+#[tauri::command]
+async fn import_codex_account() -> Result<account::CodexAccountStatusV1, ErrorEnvelopeV1> {
+    let _operation = operation_gate::try_begin("account_import")
+        .map_err(|error| command_error("account_import", error))?;
+    tauri::async_runtime::spawn_blocking(import_codex_account_inner)
+        .await
+        .map_err(|error| command_error("account_import", format!("导入账号任务失败: {error}")))?
+        .map_err(|error| command_error("account_import", error))
+}
+
+fn codex_home_dir() -> Result<PathBuf, String> {
+    if let Some(custom) = env::var_os("CODEX_HOME").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(custom));
+    }
+    Ok(user_home_dir()?.join(".codex"))
+}
+
+fn account_api_base() -> String {
+    env::var("CODEX_ASSISTANT_ACCOUNT_API_BASE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| account::DEFAULT_ACCOUNT_API_BASE.to_string())
+}
+
+fn collect_codex_account_status() -> Result<account::CodexAccountStatusV1, String> {
+    let paths = resolve_paths()?;
+    account::collect_account_status(&codex_home_dir()?, &paths.install_root)
+}
+
+fn import_codex_account_inner() -> Result<account::CodexAccountStatusV1, String> {
+    let paths = resolve_paths()?;
+    account::import_codex_account(&codex_home_dir()?, &paths.install_root, &account_api_base())
 }
 
 #[tauri::command]
@@ -4140,6 +4184,8 @@ pub fn run() {
             complete_assistant_uninstall_handoff,
             get_appearance_status,
             apply_appearance,
+            get_codex_account_status,
+            import_codex_account,
             import_theme_image,
             list_preset_themes,
             list_gallery_themes,
