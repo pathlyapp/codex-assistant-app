@@ -192,7 +192,7 @@
 
 <header class="hero" id="top">
   <div class="container">
-    <span class="badge">v0.9.3 · Windows / macOS</span>
+    <span class="badge">免费下载 · Windows / macOS · 无需 GitHub 账号</span>
     <h1>第三方模型接入 + 个性化背景<br><span class="grad">全部在本地完成配置</span></h1>
     <p class="sub">Codex 助手把「准备第三方模型服务 → 测试连接 → 选择模型 → 写入配置 → 验证结果 → 打开 Codex → 设置个性化背景」整理成一条清晰、可检查、可恢复的本地流程。</p>
     <div class="hero-cta">
@@ -219,8 +219,8 @@
     <h2 class="section-title">产品演示</h2>
     <p class="section-sub">6 分钟看完：从服务信息到模型可用，再到个性化背景的完整流程。</p>
     <div class="video-wrap">
-      <video controls preload="metadata" playsinline src="https://github.com/pathlyapp/codex-assistant-app/releases/download/media/Codex-faststart.mp4">
-        你的浏览器不支持视频播放，可直接<a href="https://github.com/pathlyapp/codex-assistant-app/releases/download/media/Codex-faststart.mp4">下载演示视频</a>。
+      <video controls preload="metadata" playsinline src="media/Codex-faststart.mp4">
+        你的浏览器不支持视频播放，可直接<a href="media/Codex-faststart.mp4">下载演示视频</a>。
       </video>
     </div>
   </div>
@@ -305,29 +305,29 @@
 <section id="download">
   <div class="container">
     <h2 class="section-title">下载安装</h2>
-    <p class="section-sub">以下链接始终指向最新版本。每个发布附带 <code>SHA256SUMS.txt</code> 校验文件，<a href="https://github.com/pathlyapp/codex-assistant-app/releases" target="_blank" rel="noopener">查看所有版本</a>。</p>
+    <p class="section-sub">安装包由本站直接提供，不需要 GitHub 账号。每个文件可用旁边的 <code>SHA256SUMS.txt</code> 校验完整性。</p>
     <table class="dl-table">
       <thead><tr><th>平台</th><th>安装包</th><th></th></tr></thead>
       <tbody>
         <tr>
-          <td>Windows x64</td>
+          <td>Windows x64<br><span style="color:var(--muted);font-size:13px">v0.9.3</span></td>
           <td><code>CodexAssistant-windows-x64-setup.exe</code></td>
-          <td><a class="btn btn-primary" href="https://github.com/pathlyapp/codex-assistant-app/releases/latest/download/CodexAssistant-windows-x64-setup.exe">下载</a></td>
+          <td><a class="btn btn-primary" href="downloads/CodexAssistant-windows-x64-setup.exe">下载</a></td>
         </tr>
         <tr>
-          <td>macOS Apple Silicon</td>
+          <td>macOS Apple Silicon<br><span style="color:var(--muted);font-size:13px">v0.9.4</span></td>
           <td><code>CodexAssistant-macos-arm64.app.zip</code></td>
-          <td><a class="btn btn-primary" href="https://github.com/pathlyapp/codex-assistant-app/releases/latest/download/CodexAssistant-macos-arm64.app.zip">下载</a></td>
+          <td><a class="btn btn-primary" href="downloads/CodexAssistant-macos-arm64.app.zip">下载</a></td>
         </tr>
         <tr>
           <td>校验文件</td>
           <td><code>SHA256SUMS.txt</code></td>
-          <td><a class="btn" href="https://github.com/pathlyapp/codex-assistant-app/releases/latest/download/SHA256SUMS.txt">下载</a></td>
+          <td><a class="btn" href="downloads/SHA256SUMS.txt">下载</a></td>
         </tr>
       </tbody>
     </table>
     <div class="note">
-      <b>安全提示：</b>macOS 安装包已经 Apple 开发者证书签名并公证；Windows 安装包暂未签名，SmartScreen 可能提示「未知开发者」，确认下载来源为本页面或官方 GitHub Releases 即可。两个平台都建议通过 <code>SHA256SUMS.txt</code> 校验文件完整性。
+      <b>安全提示：</b>macOS 安装包已经 Apple 开发者证书签名并公证；Windows 安装包暂未签名，SmartScreen 可能提示「未知开发者」，确认下载来源为本站即可。建议通过 <code>SHA256SUMS.txt</code> 校验文件完整性。当前 Windows 包仍为 v0.9.3（后续 Windows 构建因签名 runner 离线暂未更新）。
     </div>
     <div class="note" style="margin-top:14px;">
       <b>使用前你只需要准备：</b>已安装并完成初始化的官方 ChatGPT 客户端；第三方服务商提供的 OpenAI-compatible 接口地址；服务商的 Access Key 与希望使用的模型。
