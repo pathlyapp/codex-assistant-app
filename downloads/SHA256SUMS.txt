@@ -1,2 +1,2 @@
-afde05fb1ab88e502b965e606db7dc539ba9e8eebbd9160f7f7bcde783c679ad  CodexAssistant-macos-arm64.app.zip
-6a4e06b797fb29f9ced45e35c85b540d728bd90b333937cdbe6a6e4cf6ba75f2  CodexAssistant-windows-x64-setup.exe
+9344048ffbdc8e0edf85e185b16d3b66a505f4f6f6f5e3992e931f593658e902  CodexAssistant-macos-arm64.app.zip
+c47dab0432e51a97ef573b726141956adf2b50cfb43e1ec36d53382259e21b8f  CodexAssistant-windows-x64-setup.exe
