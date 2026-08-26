@@ -301,7 +301,8 @@ async function runProbe() {
     }, 90000);
     const text = await response.text();
     if (response.ok) {
-      const completed = text.includes("response.completed");
+      // max_output_tokens 很小，reasoning 模型常以 response.incomplete 截断收尾，同样代表链路正常
+      const completed = text.includes("response.completed") || text.includes("response.incomplete");
       setItem("probeList", "probe", completed ? "pass" : "warn", "真实请求测试",
         `模型 ${model} 请求成功 · HTTP ${response.status} · 总耗时 ${ms}ms`
         + (completed ? "" : "\n响应已返回但未收到完成事件，可能被中途截断"));
