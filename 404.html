@@ -3,9 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>页面不存在 — Codex 助手</title>
-<link rel="canonical" href="https://codexhelper.app/">
-<meta http-equiv="refresh" content="8; url=/">
+<title>Codex 助手</title>
+<link rel="canonical" href="https://codexhp.cn/">
+<meta http-equiv="refresh" content="0; url=https://codexhp.cn/">
+<script>
+(function () {
+  var dest = "https://codexhp.cn" + location.pathname + location.search + location.hash;
+  location.replace(dest);
+})();
+</script>
 <style>
   body {
     margin: 0;
@@ -24,8 +30,11 @@
 </head>
 <body>
   <main>
-    <h1>没有这个页面</h1>
-    <p>请回到 <a href="/">codexhelper.app</a> 下载 Codex 助手，不需要登录 GitHub。</p>
+    <p>官网已迁移至 <a id="dest" href="https://codexhp.cn/">https://codexhp.cn/</a>，正在跳转。</p>
+    <script>
+      document.getElementById("dest").href =
+        "https://codexhp.cn" + location.pathname + location.search + location.hash;
+    </script>
   </main>
 </body>
 </html>
